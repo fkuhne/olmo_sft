@@ -1,0 +1,19 @@
+[project]
+name = "olmo"
+version = "0.1.0"
+description = "Example project configured with uv"
+authors = [
+    { name = "Your Name", email = "you@example.com" },
+]
+dependencies = [
+    # add runtime dependencies here, e.g. "requests >= 2.30"
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# uv-specific configuration is generally optional; the
+# tool reads standard fields above.  You can add
+# a lockfile or specify python versions via `uv`
+# commands rather than in toml.
