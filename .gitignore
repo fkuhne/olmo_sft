@@ -46,3 +46,4 @@ golden_eval.jsonl
 
 # Jupyter
 .ipynb_checkpoints/
+eval_results.json
