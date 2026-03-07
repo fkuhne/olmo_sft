@@ -34,8 +34,11 @@ pip install -e ".[training]"
 export OPENAI_API_KEY="your_key_here"
 python build_dataset.py
 
-# 3. Follow the training plan
-# See sft_plan.md for Phases 3–6 (SFT, DPO, Eval, Deployment)
+# 3. Train (SFT → DPO → Evaluate → Merge)
+python train_sft.py
+python train_dpo.py
+python evaluate.py
+python merge_model.py
 ```
 
 **Hardware Requirements:** ≥ 24 GB VRAM (A100, RTX 3090/4090, or RTX 6000 Ada). If no Ampere GPU is available, use FP16 instead of BF16 and disable Flash Attention 2.
@@ -86,8 +89,14 @@ olmo/
 ├── teacher_model_synthesis.py      # GPT-4o synthetic QA generation
 ├── deduplicate_dataset.py          # Semantic dedup via sentence-transformers
 ├── generate_golden_eval.py         # Golden evaluation set generator
+├── train_sft.py                    # Phase 3 — Supervised Fine-Tuning
+├── train_dpo.py                    # Phase 4 — DPO Preference Alignment
+├── evaluate.py                     # Phase 5 — Automated Evaluation & Red Teaming
+├── merge_model.py                  # Phase 6 — Weight Merging for Deployment
 ├── runpod_setup.sh                 # RunPod GPU environment setup
 ├── olmo.ipynb                      # Exploratory notebook
+├── examples/
+│   └── sample_dataset.jsonl        # 10 representative training examples
 ├── pyproject.toml                  # Project metadata & pinned dependencies
 ├── LICENSE                         # Apache 2.0
 └── .gitignore
