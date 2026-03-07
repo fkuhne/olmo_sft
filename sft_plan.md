@@ -24,7 +24,7 @@ MODEL_ID = "allenai/OLMo-2-0425-1B"
 # 2. Tokenizer Setup
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
 tokenizer.padding_side = "right"
 
 # 3. Base Model Initialization
@@ -34,6 +34,7 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     attn_implementation="flash_attention_2"
 )
+model.resize_token_embeddings(len(tokenizer))  # Resize embeddings to accommodate the new pad token
 
 # 4. LoRA Configuration (Targeting all linear layers)
 peft_config = LoraConfig(
@@ -166,7 +167,7 @@ OUTPUT_DIR = "./olmo2-1b-domain-sft"
 # 2. Load Tokenizer
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
 tokenizer.padding_side = "right"
 
 # 3. Load Base Model in BF16
@@ -176,6 +177,7 @@ model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     attn_implementation="flash_attention_2"
 )
+model.resize_token_embeddings(len(tokenizer))  # Resize embeddings to accommodate the new pad token
 
 # 4. LoRA Configuration
 peft_config = LoraConfig(
@@ -276,7 +278,7 @@ OUTPUT_DIR = "./olmo2-1b-domain-dpo"
 # 2. Load Tokenizer
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
 tokenizer.padding_side = "right"
 
 # 3. Load Base Model and SFT Adapters
@@ -287,6 +289,7 @@ base_model = AutoModelForCausalLM.from_pretrained(
     device_map="auto",
     attn_implementation="flash_attention_2"
 )
+base_model.resize_token_embeddings(len(tokenizer))  # Must match the SFT-trained embedding size
 # Load the model with the SFT adapters applied. DPOTrainer will use this as the policy model,
 # and temporarily disable the adapters to compute reference logits.
 model = PeftModel.from_pretrained(base_model, SFT_ADAPTER_PATH, is_trainable=True)
@@ -403,12 +406,13 @@ FINAL_ADAPTER_PATH = "./olmo2-1b-domain-dpo" # Must point to the aligned DPO wei
 print("Loading Model for Evaluation...")
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL_ID)
 if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.add_special_tokens({"pad_token": "<|pad|>"})
 tokenizer.padding_side = "left"
 
 model = AutoModelForCausalLM.from_pretrained(
     BASE_MODEL_ID, torch_dtype=torch.bfloat16, device_map="auto"
 )
+model.resize_token_embeddings(len(tokenizer))  # Must match the trained embedding size
 model = PeftModel.from_pretrained(model, FINAL_ADAPTER_PATH)
 model.eval()
 
