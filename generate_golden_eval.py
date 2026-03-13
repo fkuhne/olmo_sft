@@ -1,15 +1,85 @@
 import os
 import json
-from openai import OpenAI
+import argparse
 
-# Initialize OpenAI Client
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# ==============================================================================
+# Provider Detection (shared logic with teacher_model_synthesis.py)
+# ==============================================================================
+def detect_provider(model: str) -> str:
+    """Auto-detect provider from model name."""
+    if "claude" in model.lower():
+        return "anthropic"
+    return "openai"
 
-# The domain is configurable — pass any subject area for your PDF corpus.
-DOMAIN = os.environ.get("DOMAIN", "technical documentation")
+def build_client(provider: str, api_key: str | None = None):
+    """Build the appropriate API client for the given provider."""
+    if provider == "openai":
+        from openai import OpenAI
+        key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not key:
+            raise ValueError("Set OPENAI_API_KEY env var or pass --api-key.")
+        return OpenAI(api_key=key)
+    elif provider == "anthropic":
+        try:
+            import anthropic
+        except ImportError:
+            raise ImportError("The 'anthropic' package is required. Run: pip install anthropic")
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
+            raise ValueError("Set ANTHROPIC_API_KEY env var or pass --api-key.")
+        return anthropic.Anthropic(api_key=key)
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
 
-# Define System Prompt focusing on multi-step reasoning
-SYSTEM_PROMPT = f"""You are an expert in {DOMAIN}. Your objective is to create highly complex, edge-case scenarios that test deep domain knowledge and multi-step reasoning.
+# ==============================================================================
+# Generation Functions
+# ==============================================================================
+def generate_scenarios_openai(client, model: str, system_prompt: str, domain: str, batch_size: int = 10):
+    response = client.responses.create(
+        model=model,
+        instructions=system_prompt,
+        input=f"Generate exactly {batch_size} complex, edge-case {domain} scenarios focusing on multi-step reasoning. Output valid JSON.",
+        text={"format": {"type": "json_object"}},
+        temperature=0.7
+    )
+    data = json.loads(response.output_text)
+    return data.get("scenarios", [])
+
+def generate_scenarios_anthropic(client, model: str, system_prompt: str, domain: str, batch_size: int = 10):
+    user_prompt = (
+        f"Generate exactly {batch_size} complex, edge-case {domain} scenarios focusing on multi-step reasoning.\n\n"
+        "You MUST respond with valid JSON only, using a single key \"scenarios\" containing an array of objects.\n"
+        "Do not include any text outside the JSON object."
+    )
+    response = client.messages.create(
+        model=model,
+        max_tokens=8192,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_prompt}],
+        temperature=0.7,
+    )
+    data = json.loads(response.content[0].text)
+    return data.get("scenarios", [])
+
+# ==============================================================================
+# Main
+# ==============================================================================
+def main():
+    parser = argparse.ArgumentParser(description="Generate golden evaluation scenarios for domain QA")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher model ID (e.g., gpt-4o, claude-3-5-sonnet-20241022)")
+    parser.add_argument("--provider", default=None, help="API provider: 'openai' or 'anthropic' (auto-detected from model name)")
+    parser.add_argument("--api-key", default=None, help="API key (falls back to OPENAI_API_KEY or ANTHROPIC_API_KEY env var)")
+    parser.add_argument("--count", type=int, default=100, help="Number of scenarios to generate (default: 100)")
+    parser.add_argument("--output", default="golden_eval.jsonl", help="Output file path (default: golden_eval.jsonl)")
+    args = parser.parse_args()
+
+    provider = args.provider or detect_provider(args.model)
+    client = build_client(provider, args.api_key)
+
+    # The domain is configurable via env var or defaults to "technical documentation"
+    domain = os.environ.get("DOMAIN", "technical documentation")
+
+    system_prompt = f"""You are an expert in {domain}. Your objective is to create highly complex, edge-case scenarios that test deep domain knowledge and multi-step reasoning.
 You must focus purely on multi-step reasoning questions that require deep diagnostic logic.
 
 Output exactly 10 scenarios.
@@ -20,50 +90,32 @@ Each object MUST have the following keys:
 - "rejected": A plausible but incorrect or factually flawed resolution that might mislead a user or cause further issues.
 """
 
-def generate_scenarios(batch_size=10):
-    response = client.responses.create(
-        model="gpt-4o",
-        instructions=SYSTEM_PROMPT,
-        input=f"Generate exactly {batch_size} complex, edge-case {DOMAIN} scenarios focusing on multi-step reasoning. Output valid JSON.",
-        text={"format": {"type": "json_object"}},
-        temperature=0.7
-    )
-    
-    content = response.output_text
-    data = json.loads(content)
-    return data.get("scenarios", [])
-
-def main():
-    target_count = 100
+    generate_fn = generate_scenarios_openai if provider == "openai" else generate_scenarios_anthropic
     batch_size = 10
-    total_generated = 0
-    output_file = "golden_eval.jsonl"
-    
-    print(f"Generating {target_count} complex {DOMAIN} scenarios...")
-    
+
+    print(f"Generating {args.count} complex {domain} scenarios using {provider}:{args.model}...")
+
     scenarios = []
-    # Loop until we reach target_count
-    while total_generated < target_count:
+    while len(scenarios) < args.count:
         try:
-            print(f"Generating batch... ({total_generated}/{target_count})")
-            batch = generate_scenarios(batch_size)
+            print(f"Generating batch... ({len(scenarios)}/{args.count})")
+            batch = generate_fn(client, args.model, system_prompt, domain, batch_size)
             if not batch:
                 continue
             scenarios.extend(batch)
-            total_generated = len(scenarios)
         except Exception as e:
             print(f"Error generating batch: {e}")
-            
+
     # Trim to exactly target_count
-    scenarios = scenarios[:target_count]
-    
+    scenarios = scenarios[:args.count]
+
     # Save to JSONL
-    print(f"Saving to {output_file}...")
-    with open(output_file, "w") as f:
+    print(f"Saving to {args.output}...")
+    with open(args.output, "w") as f:
         for scenario in scenarios:
             f.write(json.dumps(scenario) + "\n")
-            
-    print(f"Successfully generated and saved {len(scenarios)} scenarios to {output_file}.")
+
+    print(f"Successfully generated and saved {len(scenarios)} scenarios to {args.output}.")
 
 if __name__ == "__main__":
     main()

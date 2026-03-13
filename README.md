@@ -39,6 +39,10 @@ export OPENAI_API_KEY="your_key_here"
 mkdir -p manuals && cp /path/to/your/*.pdf manuals/
 python build_dataset.py
 
+# Or use an Anthropic model instead:
+export ANTHROPIC_API_KEY="your_key_here"
+python build_dataset.py --model claude-3-5-sonnet-20241022
+
 # 3. (Optional) Generate the golden evaluation set
 python generate_golden_eval.py
 ```
@@ -52,8 +56,8 @@ Then transfer the generated `alignment_dataset.jsonl` and `golden_eval.jsonl` to
 pip install -e ".[training]"
 
 # 2. Generate dataset (or upload the .jsonl files generated locally)
-export OPENAI_API_KEY="your_key_here"
-python build_dataset.py
+export OPENAI_API_KEY="your_key_here"   # or ANTHROPIC_API_KEY
+python build_dataset.py                  # --model claude-3-5-sonnet-20241022 for Anthropic
 
 # 3. Train (SFT → DPO → Evaluate → Merge)
 python train_sft.py
@@ -143,11 +147,11 @@ These modular Python scripts handle the conversion of raw PDFs into a training-r
 
 | Script | Purpose |
 |---|---|
-| `build_dataset.py` | **Orchestrator.** Scans `./manuals/`, processes every PDF, and outputs `alignment_dataset.jsonl`. |
+| `build_dataset.py` | **Orchestrator.** Scans `./manuals/`, processes every PDF, and outputs `alignment_dataset.jsonl`. Supports `--model` and `--provider` flags. |
 | `pdf_extractor.py` | **Ingestion.** Uses IBM Docling for layout-aware PDF parsing with table preservation. |
-| `teacher_model_synthesis.py` | **Synthesis.** Generates SFT + DPO pairs via GPT-4o with Pydantic structured outputs. Configurable domain via the `domain` parameter. |
+| `teacher_model_synthesis.py` | **Synthesis.** Generates SFT + DPO pairs via OpenAI or Anthropic with Pydantic structured outputs. Configurable domain, model, and provider. |
 | `deduplicate_dataset.py` | **Quality Control.** Cosine similarity dedup (threshold > 0.85) using `all-MiniLM-L6-v2`. |
-| `generate_golden_eval.py` | **Evaluation.** Generates 100 complex multi-step evaluation scenarios. Configurable via the `DOMAIN` env var. |
+| `generate_golden_eval.py` | **Evaluation.** Generates 100 complex multi-step evaluation scenarios. Supports `--model`, `--provider`, and `--count` flags. |
 
 ---
 

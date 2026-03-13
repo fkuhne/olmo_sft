@@ -1,6 +1,7 @@
 import os
 import glob
 import time
+import argparse
 
 # Import the three pillars we built previously
 # (Ensure pdf_extractor.py, teacher_model_synthesis.py, and deduplicate_dataset.py are in the same folder)
@@ -9,16 +10,34 @@ from teacher_model_synthesis import TeacherModelSynthesizer
 from deduplicate_dataset import DatasetFilter
 
 class DatasetBuilder:
-    def __init__(self, input_dir: str = "./manuals", output_file: str = "alignment_dataset.jsonl") -> None:
+    def __init__(
+        self,
+        input_dir: str = "./manuals",
+        output_file: str = "alignment_dataset.jsonl",
+        model: str = "gpt-4o",
+        provider: str | None = None,
+        domain: str = "technical documentation",
+    ) -> None:
         """
         Initializes the master orchestrator.
+
+        Args:
+            input_dir: Directory containing PDF manuals.
+            output_file: Path for the output JSONL dataset.
+            model: Teacher model ID (e.g., "gpt-4o", "claude-3-5-sonnet-20241022").
+            provider: API provider ("openai" or "anthropic"). Auto-detected from model name if None.
+            domain: Subject-matter domain for prompt context.
         """
         self.input_dir = input_dir
         self.output_file = output_file
         
         print("--- INITIALIZING PHASE 2 PIPELINE ---")
         self.extractor = DoclingManualExtractor()
-        self.synthesizer = TeacherModelSynthesizer() # Requires OPENAI_API_KEY in env
+        self.synthesizer = TeacherModelSynthesizer(
+            domain=domain,
+            model=model,
+            provider=provider,
+        )  # Requires OPENAI_API_KEY or ANTHROPIC_API_KEY in env
         self.filter = DatasetFilter(similarity_threshold=0.85)
 
     def extract_device_context(self, filename: str) -> str:
@@ -104,12 +123,23 @@ class DatasetBuilder:
 # Execution Example for the AI Agent
 # ==============================================================================
 if __name__ == "__main__":
-    # Agent Directive: Ensure the ./manuals folder exists and contains the PDFs
-    os.makedirs("./manuals", exist_ok=True)
+    parser = argparse.ArgumentParser(description="Phase 2: Build training dataset from PDF manuals")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher model ID (e.g., gpt-4o, claude-3-5-sonnet-20241022)")
+    parser.add_argument("--provider", default=None, help="API provider: 'openai' or 'anthropic' (auto-detected from model name)")
+    parser.add_argument("--domain", default="technical documentation", help="Subject-matter domain")
+    parser.add_argument("--input-dir", default="./manuals", help="Directory containing PDF manuals")
+    parser.add_argument("--output", default="alignment_dataset.jsonl", help="Output JSONL file path")
+    args = parser.parse_args()
+
+    # Ensure the input directory exists
+    os.makedirs(args.input_dir, exist_ok=True)
     
     builder = DatasetBuilder(
-        input_dir="./manuals",
-        output_file="alignment_dataset.jsonl"
+        input_dir=args.input_dir,
+        output_file=args.output,
+        model=args.model,
+        provider=args.provider,
+        domain=args.domain,
     )
     
     # Run the pipeline
