@@ -2,6 +2,7 @@ import os
 import glob
 import time
 import argparse
+from typing import Optional
 
 # Import the three pillars we built previously
 # (Ensure pdf_extractor.py, teacher_model_synthesis.py, and deduplicate_dataset.py are in the same folder)
@@ -15,7 +16,7 @@ class DatasetBuilder:
         input_dir: str = "./manuals",
         output_file: str = "alignment_dataset.jsonl",
         model: str = "gpt-4o",
-        provider: str | None = None,
+        provider: Optional[str] = None,
         domain: str = "technical documentation",
     ) -> None:
         """
@@ -81,7 +82,7 @@ class DatasetBuilder:
                 
                 # Loop 2: Iterate through every chunk in the manual
                 for j, chunk in enumerate(enriched_chunks):
-                    total_chunks_processed += 1
+                    total_chunks_processed += 1  # type: ignore
                     print(f"  -> Synthesizing chunk {j+1}/{len(enriched_chunks)}...", end=" ", flush=True)
                     
                     # Step 2: Generate SFT and DPO data (OpenAI)
@@ -94,10 +95,10 @@ class DatasetBuilder:
                     # Loop 3: Filter and Deduplicate (Sentence Transformers)
                     kept_count = 0
                     for qa_tuple in generated_tuples:
-                        total_pairs_generated += 1
+                        total_pairs_generated += 1  # type: ignore
                         # process_new_pair returns True if kept, False if dropped
                         if self.filter.process_new_pair(qa_tuple):
-                            kept_count += 1
+                            kept_count += 1  # type: ignore
                             
                     print(f"[Generated {len(generated_tuples)} | Kept {kept_count}]")
                     
