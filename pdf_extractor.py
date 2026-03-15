@@ -1,45 +1,98 @@
+"""
+pdf_extractor.py — Layout-aware PDF extraction via IBM Docling.
+
+Parses PDF documents using Docling's vision models (DocLayNet) to
+faithfully preserve tables, headings, and reading order. Produces
+enriched markdown chunks with source context metadata.
+"""
+
+from __future__ import annotations
+
+import logging
 import os
-from docling.document_converter import DocumentConverter
-from docling.chunking import HierarchicalChunker
+
+logger = logging.getLogger(__name__)
+
 
 class DoclingManualExtractor:
+    """Extracts and chunks PDF documents using IBM Docling.
+
+    Uses DocLayNet-based ML models to understand the visual structure
+    of the PDF before extracting text. Chunks are produced based on the
+    document's internal heading hierarchy.
+    """
+
     def __init__(self) -> None:
-        """
-        Initializes the Docling converter and its native hierarchical chunker.
-        Docling uses advanced ML models (DocLayNet) under the hood to understand 
-        the visual structure of the PDF before extracting text.
-        """
+        """Initialize the Docling converter and hierarchical chunker."""
+        from docling.document_converter import DocumentConverter
+        from docling.chunking import HierarchicalChunker
+
         print("Initializing Docling Document Converter...")
         self.converter = DocumentConverter()
         self.chunker = HierarchicalChunker()
 
     def process_manual(self, pdf_path: str, device_context: str) -> list[str]:
+        """Parse a PDF and return enriched markdown chunks.
+
+        Uses Docling's vision models to identify tables, headers, and reading
+        order, then chunks by heading hierarchy and injects source metadata.
+
+        Args:
+            pdf_path: Absolute or relative path to the PDF file.
+            device_context: Human-readable name of the document source
+                (e.g. ``"Product User Guide"``).
+
+        Returns:
+            List of markdown-formatted text chunks, each prefixed with a
+            source context header. Chunks shorter than 100 characters are
+            filtered out. Returns an empty list on failure.
+
+        Raises:
+            FileNotFoundError: If *pdf_path* does not exist (logged, not raised).
         """
-        Parses a PDF manual, perfectly preserves tables/columns as Markdown,
-        chunks the document based on its internal heading structure, and injects metadata.
-        """
+        # Validate file existence before calling Docling
+        if not os.path.exists(pdf_path):
+            logger.error("PDF not found: %s", pdf_path)
+            print(f"ERROR: PDF not found: {pdf_path}")
+            return []
+
+        if not pdf_path.lower().endswith(".pdf"):
+            logger.warning("File does not have .pdf extension: %s", pdf_path)
+
         print(f"\nAnalyzing Structural Layout from: {pdf_path}...")
-        
-        # 1. High-Fidelity Conversion
-        # This step uses vision models to identify tables, headers, and reading order.
-        conv_result = self.converter.convert(pdf_path)
-        
+
+        try:
+            # 1. High-Fidelity Conversion
+            conv_result = self.converter.convert(pdf_path)
+        except PermissionError:
+            logger.error("Permission denied reading PDF: %s", pdf_path)
+            print(f"ERROR: Permission denied reading PDF: {pdf_path}")
+            return []
+        except Exception as e:
+            logger.error(
+                "PDF parsing failed for %s: %s: %s",
+                pdf_path, type(e).__name__, e,
+            )
+            print(f"ERROR: PDF parsing failed for {pdf_path}: {type(e).__name__}: {e}")
+            return []
+
         # 2. Semantic Chunking
-        # Docling natively understands the document tree (Heading 1 -> Heading 2 -> Paragraph)
-        # and chunks the text logically based on that hierarchy.
-        chunks = self.chunker.chunk(conv_result.document)
+        try:
+            chunks = self.chunker.chunk(conv_result.document)
+        except Exception as e:
+            logger.error("Chunking failed for %s: %s", pdf_path, e)
+            print(f"ERROR: Chunking failed for {pdf_path}: {e}")
+            return []
 
         # 3. Metadata Injection & Filtering
-        final_dataset_chunks = []
+        final_dataset_chunks: list[str] = []
         for chunk in chunks:
-            # Extract the clean Markdown text from the chunk
             raw_text = chunk.text
-            
-            # Filter out tiny, useless chunks (like isolated page numbers or logos)
+
+            # Filter out tiny, useless chunks (isolated page numbers, logos, etc.)
             if len(raw_text.strip()) < 100:
-                continue 
-            
-            # Format as clean Markdown with the injected context header
+                continue
+
             enriched_chunk = (
                 f"### [Source Context: {device_context}]\n\n"
                 f"{raw_text}\n"
@@ -49,23 +102,22 @@ class DoclingManualExtractor:
         print(f"Extraction complete. Yielded {len(final_dataset_chunks)} high-fidelity chunks.")
         return final_dataset_chunks
 
+
 # ==============================================================================
-# Execution Example for the AI Agent
+# CLI Entry Point
 # ==============================================================================
 if __name__ == "__main__":
     extractor = DoclingManualExtractor()
-    
-    # Example Target
+
     target_pdf = "example_manual.pdf"
     source_name = "Product User Guide"
-    
+
     if os.path.exists(target_pdf):
         enriched_chunks = extractor.process_manual(target_pdf, source_name)
-        
+
         if enriched_chunks:
             print("\n--- PREVIEW OF DOCLING CHUNK 1 ---")
             print(enriched_chunks[0])
             print("----------------------------------")
     else:
         print(f"Awaiting PDF file: {target_pdf}")
-    

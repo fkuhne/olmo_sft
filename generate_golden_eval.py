@@ -1,63 +1,87 @@
-import os
-import json
+"""
+generate_golden_eval.py — Golden evaluation set generator.
+
+Generates complex, multi-step reasoning scenarios for evaluating
+domain-specific QA models. Supports OpenAI, Anthropic, and Ollama backends.
+
+Usage:
+    python generate_golden_eval.py [--model MODEL] [--count N] [--output PATH]
+"""
+
+from __future__ import annotations
+
 import argparse
-from typing import Optional
+import json
+import logging
+import os
+
+from provider_utils import build_client, detect_provider, retry_on_rate_limit
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
-# Provider Detection (shared logic with teacher_model_synthesis.py)
+# Generation Functions (per provider)
 # ==============================================================================
-OLLAMA_BASE_URL = "http://localhost:11434/v1"
 
-def detect_provider(model: str) -> str:
-    """Auto-detect provider from model name."""
-    lower = model.lower()
-    if "claude" in lower:
-        return "anthropic"
-    if "gpt" in lower or "o1" in lower or "o3" in lower:
-        return "openai"
-    return "ollama"
 
-def build_client(provider: str, api_key: Optional[str] = None, ollama_base_url: Optional[str] = None):
-    """Build the appropriate API client for the given provider."""
-    if provider == "openai":
-        from openai import OpenAI
-        key = api_key or os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise ValueError("Set OPENAI_API_KEY env var or pass --api-key.")
-        return OpenAI(api_key=key)
-    elif provider == "anthropic":
-        try:
-            import anthropic
-        except ImportError:
-            raise ImportError("The 'anthropic' package is required. Run: uv pip install anthropic")
-        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise ValueError("Set ANTHROPIC_API_KEY env var or pass --api-key.")
-        return anthropic.Anthropic(api_key=key)
-    elif provider == "ollama":
-        from openai import OpenAI
-        url = ollama_base_url or os.environ.get("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
-        return OpenAI(api_key="ollama", base_url=url)
-    else:
-        raise ValueError(f"Unsupported provider: {provider}")
+@retry_on_rate_limit()
+def generate_scenarios_openai(
+    client: object,
+    model: str,
+    system_prompt: str,
+    domain: str,
+    batch_size: int = 10,
+) -> list[dict]:
+    """Generate evaluation scenarios via OpenAI JSON mode.
 
-# ==============================================================================
-# Generation Functions
-# ==============================================================================
-def generate_scenarios_openai(client, model: str, system_prompt: str, domain: str, batch_size: int = 10):
+    Args:
+        client: OpenAI client instance.
+        model: Model identifier (e.g. ``"gpt-4o"``).
+        system_prompt: System instructions.
+        domain: Subject-matter domain string.
+        batch_size: Number of scenarios per batch.
+
+    Returns:
+        List of scenario dicts with ``"prompt"``, ``"chosen"``, ``"rejected"`` keys.
+    """
     response = client.responses.create(
         model=model,
         instructions=system_prompt,
-        input=f"Generate exactly {batch_size} complex, edge-case {domain} scenarios focusing on multi-step reasoning. Output valid JSON.",
-        text={"format": {"type": "json_object"}}
+        input=(
+            f"Generate exactly {batch_size} complex, edge-case {domain} "
+            "scenarios focusing on multi-step reasoning. Output valid JSON."
+        ),
+        text={"format": {"type": "json_object"}},
     )
     data = json.loads(response.output_text)
     return data.get("scenarios", [])
 
-def generate_scenarios_anthropic(client, model: str, system_prompt: str, domain: str, batch_size: int = 10):
+
+@retry_on_rate_limit()
+def generate_scenarios_anthropic(
+    client: object,
+    model: str,
+    system_prompt: str,
+    domain: str,
+    batch_size: int = 10,
+) -> list[dict]:
+    """Generate evaluation scenarios via Anthropic JSON mode.
+
+    Args:
+        client: Anthropic client instance.
+        model: Model identifier.
+        system_prompt: System instructions.
+        domain: Subject-matter domain string.
+        batch_size: Number of scenarios per batch.
+
+    Returns:
+        List of scenario dicts.
+    """
     user_prompt = (
-        f"Generate exactly {batch_size} complex, edge-case {domain} scenarios focusing on multi-step reasoning.\n\n"
-        "You MUST respond with valid JSON only, using a single key \"scenarios\" containing an array of objects.\n"
+        f"Generate exactly {batch_size} complex, edge-case {domain} "
+        "scenarios focusing on multi-step reasoning.\n\n"
+        'You MUST respond with valid JSON only, using a single key "scenarios" '
+        "containing an array of objects.\n"
         "Do not include any text outside the JSON object."
     )
     response = client.messages.create(
@@ -70,12 +94,33 @@ def generate_scenarios_anthropic(client, model: str, system_prompt: str, domain:
     data = json.loads(response.content[0].text)
     return data.get("scenarios", [])
 
-def generate_scenarios_ollama(client, model: str, system_prompt: str, domain: str, batch_size: int = 10):
-    """Uses Ollama's OpenAI-compatible chat completions endpoint with JSON mode."""
+
+@retry_on_rate_limit()
+def generate_scenarios_ollama(
+    client: object,
+    model: str,
+    system_prompt: str,
+    domain: str,
+    batch_size: int = 10,
+) -> list[dict]:
+    """Generate evaluation scenarios via Ollama's OpenAI-compatible endpoint.
+
+    Args:
+        client: OpenAI-compatible Ollama client.
+        model: Model identifier (e.g. ``"llama3.1:8b"``).
+        system_prompt: System instructions.
+        domain: Subject-matter domain string.
+        batch_size: Number of scenarios per batch.
+
+    Returns:
+        List of scenario dicts.
+    """
     user_prompt = (
-        f"Generate exactly {batch_size} complex, edge-case {domain} scenarios focusing on multi-step reasoning.\n\n"
-        "You MUST respond with valid JSON only, using a single key \"scenarios\" containing an array of objects.\n"
-        "Each object MUST have keys: \"prompt\", \"chosen\", \"rejected\".\n"
+        f"Generate exactly {batch_size} complex, edge-case {domain} "
+        "scenarios focusing on multi-step reasoning.\n\n"
+        'You MUST respond with valid JSON only, using a single key "scenarios" '
+        "containing an array of objects.\n"
+        'Each object MUST have keys: "prompt", "chosen", "rejected".\n'
         "Do not include any text outside the JSON object."
     )
     response = client.chat.completions.create(
@@ -90,66 +135,97 @@ def generate_scenarios_ollama(client, model: str, system_prompt: str, domain: st
     data = json.loads(response.choices[0].message.content)
     return data.get("scenarios", [])
 
+
 # ==============================================================================
 # Main
 # ==============================================================================
-def main():
-    parser = argparse.ArgumentParser(description="Generate golden evaluation scenarios for domain QA")
-    parser.add_argument("--model", default="gpt-4o", help="Teacher model ID (e.g., gpt-4o, claude-3-5-sonnet-20241022, llama3.1:8b)")
-    parser.add_argument("--provider", default=None, help="API provider: 'openai', 'anthropic', or 'ollama' (auto-detected from model name)")
-    parser.add_argument("--api-key", default=None, help="API key (falls back to env vars; not needed for Ollama)")
-    parser.add_argument("--count", type=int, default=100, help="Number of scenarios to generate (default: 100)")
-    parser.add_argument("--output", default="golden_eval.jsonl", help="Output file path (default: golden_eval.jsonl)")
+
+_GENERATE_FNS = {
+    "openai": generate_scenarios_openai,
+    "anthropic": generate_scenarios_anthropic,
+    "ollama": generate_scenarios_ollama,
+}
+
+
+def main() -> None:
+    """Entry point for golden evaluation set generation."""
+    parser = argparse.ArgumentParser(
+        description="Generate golden evaluation scenarios for domain QA"
+    )
+    parser.add_argument(
+        "--model", default="gpt-4o",
+        help="Teacher model ID (e.g., gpt-4o, claude-3-5-sonnet-20241022, llama3.1:8b)",
+    )
+    parser.add_argument(
+        "--provider", default=None,
+        help="API provider: 'openai', 'anthropic', or 'ollama' (auto-detected)",
+    )
+    parser.add_argument("--api-key", default=None, help="API key (falls back to env vars)")
+    parser.add_argument("--count", type=int, default=100, help="Number of scenarios to generate")
+    parser.add_argument("--output", default="golden_eval.jsonl", help="Output file path")
     args = parser.parse_args()
 
     provider = args.provider or detect_provider(args.model)
-    client = build_client(provider, args.api_key)
+    client = build_client(provider, api_key=args.api_key)
 
-    # The domain is configurable via env var or defaults to "technical documentation"
     domain = os.environ.get("DOMAIN", "technical documentation")
 
-    system_prompt = f"""You are an expert in {domain}. Your objective is to create highly complex, edge-case scenarios that test deep domain knowledge and multi-step reasoning.
-You must focus purely on multi-step reasoning questions that require deep diagnostic logic.
+    system_prompt = (
+        f"You are an expert in {domain}. Your objective is to create highly complex, "
+        "edge-case scenarios that test deep domain knowledge and multi-step reasoning.\n"
+        "You must focus purely on multi-step reasoning questions that require deep diagnostic logic.\n\n"
+        "Output exactly 10 scenarios.\n"
+        'Return the output strictly in JSON format using a single key "scenarios", '
+        "which contains an array of objects.\n"
+        "Each object MUST have the following keys:\n"
+        '- "prompt": A detailed user query describing a complex, multi-layered issue.\n'
+        '- "chosen": The correct, step-by-step diagnostic and resolution process.\n'
+        '- "rejected": A plausible but incorrect or factually flawed resolution.\n'
+    )
 
-Output exactly 10 scenarios.
-Return the output strictly in JSON format using a single key "scenarios", which contains an array of objects.
-Each object MUST have the following keys:
-- "prompt": A detailed user query describing a complex, multi-layered issue within the domain.
-- "chosen": The correct, step-by-step diagnostic and resolution process.
-- "rejected": A plausible but incorrect or factually flawed resolution that might mislead a user or cause further issues.
-"""
-
-    generate_fns = {
-        "openai": generate_scenarios_openai,
-        "anthropic": generate_scenarios_anthropic,
-        "ollama": generate_scenarios_ollama,
-    }
-    generate_fn = generate_fns[provider]
+    generate_fn = _GENERATE_FNS[provider]
     batch_size = 10
 
     print(f"Generating {args.count} complex {domain} scenarios using {provider}:{args.model}...")
 
-    scenarios = []
+    scenarios: list[dict] = []
+    consecutive_errors = 0
+    max_consecutive_errors = 5
+
     while len(scenarios) < args.count:
         try:
             print(f"Generating batch... ({len(scenarios)}/{args.count})")
             batch = generate_fn(client, args.model, system_prompt, domain, batch_size)
             if not batch:
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error("Too many consecutive empty batches. Stopping.")
+                    break
                 continue
             scenarios.extend(batch)
+            consecutive_errors = 0
+        except json.JSONDecodeError as e:
+            logger.warning("Batch returned invalid JSON: %s", e)
+            consecutive_errors += 1
         except Exception as e:
+            logger.error("Error generating batch: %s", e)
             print(f"Error generating batch: {e}")
+            consecutive_errors += 1
 
-    # Trim to exactly target_count
-    scenarios = scenarios[:args.count]
+        if consecutive_errors >= max_consecutive_errors:
+            logger.error("Too many consecutive errors (%d). Stopping.", consecutive_errors)
+            break
 
-    # Save to JSONL
+    # Trim to exactly the target count
+    scenarios = scenarios[: args.count]
+
     print(f"Saving to {args.output}...")
     with open(args.output, "w") as f:
         for scenario in scenarios:
             f.write(json.dumps(scenario) + "\n")
 
     print(f"Successfully generated and saved {len(scenarios)} scenarios to {args.output}.")
+
 
 if __name__ == "__main__":
     main()

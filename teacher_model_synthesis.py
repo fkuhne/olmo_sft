@@ -1,102 +1,106 @@
-import os
-import json
-from typing import List, Optional
+"""
+teacher_model_synthesis.py — Synthetic data generation for SFT and DPO.
 
-from pydantic import BaseModel
+Generates high-quality question-answer pairs from document chunks using a
+teacher model (OpenAI, Anthropic, or Ollama). Produces both "chosen"
+(correct) and "rejected" (subtly flawed) responses for DPO alignment.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+
+from pydantic import BaseModel, ConfigDict
+
+from provider_utils import build_client, detect_provider, retry_on_rate_limit
+
+logger = logging.getLogger(__name__)
 
 # ==============================================================================
 # Pydantic Schemas for Strict API Formatting
 # ==============================================================================
+
+
 class SFTPair(BaseModel):
+    """A single SFT question-answer pair."""
+
+    model_config = ConfigDict(frozen=True)
+
     prompt: str
     chosen: str
 
+
 class SFTResponse(BaseModel):
-    qa_pairs: List[SFTPair]
+    """Structured response containing multiple SFT pairs."""
+
+    qa_pairs: list[SFTPair]
+
 
 class DPOResponse(BaseModel):
+    """Structured response containing a rejected answer for DPO."""
+
+    model_config = ConfigDict(frozen=True)
+
     rejected: str
 
-# ==============================================================================
-# Provider Detection Helpers
-# ==============================================================================
-OLLAMA_DEFAULT_MODEL = "llama3.1:8b"
-OLLAMA_BASE_URL = "http://localhost:11434/v1"
-
-def detect_provider(model: str) -> str:
-    """Auto-detect provider from model name."""
-    lower = model.lower()
-    if "claude" in lower:
-        return "anthropic"
-    if "gpt" in lower or "o1" in lower or "o3" in lower:
-        return "openai"
-    # If it doesn't look like a cloud model, assume Ollama (local)
-    return "ollama"
-
-def _build_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None):
-    from openai import OpenAI
-    key = api_key or os.environ.get("OPENAI_API_KEY")
-    if not key:
-        raise ValueError("OpenAI API key required. Set OPENAI_API_KEY env var or pass api_key=.")
-    return OpenAI(api_key=key, base_url=base_url)
-
-def _build_anthropic_client(api_key: Optional[str] = None):
-    try:
-        import anthropic
-    except ImportError:
-        raise ImportError("The 'anthropic' package is required for Anthropic models. Run: uv pip install anthropic")
-    key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not key:
-        raise ValueError("Anthropic API key required. Set ANTHROPIC_API_KEY env var or pass api_key=.")
-    return anthropic.Anthropic(api_key=key)
-
-def _build_ollama_client(base_url: Optional[str] = None):
-    """Ollama exposes an OpenAI-compatible API — reuse the OpenAI SDK with a custom base_url."""
-    from openai import OpenAI
-    url = base_url or os.environ.get("OLLAMA_BASE_URL", OLLAMA_BASE_URL)
-    return OpenAI(api_key="ollama", base_url=url)  # api_key is required by SDK but ignored by Ollama
 
 # ==============================================================================
 # Synthetic Data Generator Class
 # ==============================================================================
+
+
 class TeacherModelSynthesizer:
+    """Orchestrates synthetic data generation via a teacher LLM.
+
+    Supports OpenAI (structured outputs), Anthropic (JSON mode), and
+    Ollama (OpenAI-compatible local API).
+
+    Args:
+        domain: Subject-matter domain (e.g. "medical devices").
+        api_key: Explicit API key. Falls back to env vars.
+        model: Teacher model identifier.
+        provider: ``"openai"``, ``"anthropic"``, or ``"ollama"``. Auto-detected if ``None``.
+        ollama_base_url: Custom Ollama server URL.
+    """
+
     def __init__(
         self,
         domain: str = "technical documentation",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = "gpt-4o",
-        provider: Optional[str] = None,
-        ollama_base_url: Optional[str] = None,
-    ):
-        """
-        Initializes the Teacher Model synthesizer with support for OpenAI, Anthropic, and Ollama.
-
-        Args:
-            domain: The subject-matter domain for prompt context (e.g., "medical devices", "automotive repair").
-            api_key: API key for the chosen provider. Falls back to env vars. Not needed for Ollama.
-            model: The teacher model identifier (e.g., "gpt-4o", "claude-3-5-sonnet-20241022", "llama3.1:8b").
-            provider: "openai", "anthropic", or "ollama". Auto-detected from model name if not specified.
-            ollama_base_url: Custom Ollama server URL (default: http://localhost:11434/v1).
-        """
+        provider: str | None = None,
+        ollama_base_url: str | None = None,
+    ) -> None:
         self.model = model
         self.provider = provider or detect_provider(model)
         self.domain = domain
 
-        print(f"Initializing Teacher Model Synthesizer ({self.provider}:{self.model}) for domain: '{domain}'...")
+        print(
+            f"Initializing Teacher Model Synthesizer "
+            f"({self.provider}:{self.model}) for domain: '{domain}'..."
+        )
 
-        if self.provider == "openai":
-            self.client = _build_openai_client(api_key)
-        elif self.provider == "anthropic":
-            self.client = _build_anthropic_client(api_key)
-        elif self.provider == "ollama":
-            self.client = _build_ollama_client(ollama_base_url)
-        else:
-            raise ValueError(f"Unsupported provider: {self.provider}. Use 'openai', 'anthropic', or 'ollama'.")
+        self.client = build_client(
+            self.provider,
+            api_key=api_key,
+            base_url=ollama_base_url,
+        )
 
     # --------------------------------------------------------------------------
     # OpenAI implementation (structured outputs via Pydantic)
     # --------------------------------------------------------------------------
-    def _openai_generate_sft(self, system_prompt: str, user_prompt: str) -> List[dict]:
+    @retry_on_rate_limit()
+    def _openai_generate_sft(self, system_prompt: str, user_prompt: str) -> list[dict]:
+        """Generate SFT pairs via OpenAI structured outputs.
+
+        Args:
+            system_prompt: System instructions for the teacher model.
+            user_prompt: User-facing prompt with the document chunk.
+
+        Returns:
+            List of dicts with ``"prompt"`` and ``"chosen"`` keys.
+        """
         response = self.client.responses.parse(
             model=self.model,
             instructions=system_prompt,
@@ -105,7 +109,17 @@ class TeacherModelSynthesizer:
         )
         return [pair.model_dump() for pair in response.output_parsed.qa_pairs]
 
-    def _openai_generate_dpo(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+    @retry_on_rate_limit()
+    def _openai_generate_dpo(self, system_prompt: str, user_prompt: str) -> str | None:
+        """Generate a DPO rejected response via OpenAI structured outputs.
+
+        Args:
+            system_prompt: System instructions for generating flawed responses.
+            user_prompt: User-facing prompt with the original QA pair.
+
+        Returns:
+            The rejected response string, or ``None`` on failure.
+        """
         response = self.client.responses.parse(
             model=self.model,
             instructions=system_prompt,
@@ -117,8 +131,18 @@ class TeacherModelSynthesizer:
     # --------------------------------------------------------------------------
     # Anthropic implementation (JSON mode with manual Pydantic parsing)
     # --------------------------------------------------------------------------
+    @retry_on_rate_limit()
     def _anthropic_call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
-        """Makes an Anthropic API call and returns the text content."""
+        """Make an Anthropic API call and return the text content.
+
+        Args:
+            system_prompt: System instructions.
+            user_prompt: User message content.
+            temperature: Sampling temperature.
+
+        Returns:
+            Raw text response from the model.
+        """
         response = self.client.messages.create(
             model=self.model,
             max_tokens=4096,
@@ -128,7 +152,8 @@ class TeacherModelSynthesizer:
         )
         return response.content[0].text
 
-    def _anthropic_generate_sft(self, system_prompt: str, user_prompt: str) -> List[dict]:
+    def _anthropic_generate_sft(self, system_prompt: str, user_prompt: str) -> list[dict]:
+        """Generate SFT pairs via Anthropic JSON mode."""
         json_instruction = (
             "\n\nYou MUST respond with valid JSON only, matching this exact schema:\n"
             '{"qa_pairs": [{"prompt": "...", "chosen": "..."}]}\n'
@@ -138,7 +163,8 @@ class TeacherModelSynthesizer:
         parsed = SFTResponse.model_validate_json(raw)
         return [pair.model_dump() for pair in parsed.qa_pairs]
 
-    def _anthropic_generate_dpo(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+    def _anthropic_generate_dpo(self, system_prompt: str, user_prompt: str) -> str | None:
+        """Generate a DPO rejected response via Anthropic JSON mode."""
         json_instruction = (
             "\n\nYou MUST respond with valid JSON only, matching this exact schema:\n"
             '{"rejected": "..."}\n'
@@ -151,8 +177,18 @@ class TeacherModelSynthesizer:
     # --------------------------------------------------------------------------
     # Ollama implementation (OpenAI-compatible API with JSON mode)
     # --------------------------------------------------------------------------
+    @retry_on_rate_limit()
     def _ollama_call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
-        """Makes an Ollama API call via the OpenAI-compatible endpoint."""
+        """Make an Ollama API call via the OpenAI-compatible endpoint.
+
+        Args:
+            system_prompt: System instructions.
+            user_prompt: User message content.
+            temperature: Sampling temperature.
+
+        Returns:
+            Raw text response from the model.
+        """
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -164,7 +200,8 @@ class TeacherModelSynthesizer:
         )
         return response.choices[0].message.content
 
-    def _ollama_generate_sft(self, system_prompt: str, user_prompt: str) -> List[dict]:
+    def _ollama_generate_sft(self, system_prompt: str, user_prompt: str) -> list[dict]:
+        """Generate SFT pairs via Ollama JSON mode."""
         json_instruction = (
             "\n\nYou MUST respond with valid JSON only, matching this exact schema:\n"
             '{"qa_pairs": [{"prompt": "...", "chosen": "..."}]}\n'
@@ -174,7 +211,8 @@ class TeacherModelSynthesizer:
         parsed = SFTResponse.model_validate_json(raw)
         return [pair.model_dump() for pair in parsed.qa_pairs]
 
-    def _ollama_generate_dpo(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+    def _ollama_generate_dpo(self, system_prompt: str, user_prompt: str) -> str | None:
+        """Generate a DPO rejected response via Ollama JSON mode."""
         json_instruction = (
             "\n\nYou MUST respond with valid JSON only, matching this exact schema:\n"
             '{"rejected": "..."}\n'
@@ -187,9 +225,15 @@ class TeacherModelSynthesizer:
     # --------------------------------------------------------------------------
     # Public API (provider-agnostic)
     # --------------------------------------------------------------------------
-    def generate_sft_pairs(self, markdown_chunk: str) -> List[dict]:
-        """
-        Takes a Docling markdown chunk and generates 2 to 3 diverse SFT QA pairs.
+    def generate_sft_pairs(self, markdown_chunk: str) -> list[dict]:
+        """Generate diverse SFT QA pairs from a document chunk.
+
+        Args:
+            markdown_chunk: A Docling-produced markdown text chunk.
+
+        Returns:
+            List of dicts with ``"prompt"`` and ``"chosen"`` keys.
+            Returns an empty list if generation fails.
         """
         system_prompt = (
             f"You are an expert technical writer and data synthesizer for {self.domain}. "
@@ -201,7 +245,7 @@ class TeacherModelSynthesizer:
             "3. Generate questions from multiple angles (e.g., direct action, symptom-based, clarification).\n"
             "4. Always reference the specific source context in the chosen response."
         )
-        user_prompt = f"Text Chunk:\n\"\"\"{markdown_chunk}\"\"\"\n\nGenerate 2 to 3 Question-Answer pairs."
+        user_prompt = f'Text Chunk:\n"""{markdown_chunk}"""\n\nGenerate 2 to 3 Question-Answer pairs.'
 
         try:
             if self.provider == "openai":
@@ -210,13 +254,23 @@ class TeacherModelSynthesizer:
                 return self._anthropic_generate_sft(system_prompt, user_prompt)
             else:
                 return self._ollama_generate_sft(system_prompt, user_prompt)
+        except json.JSONDecodeError as e:
+            logger.warning("SFT generation returned invalid JSON: %s", e)
+            return []
         except Exception as e:
+            logger.error("SFT Generation Error: %s", e)
             print(f"SFT Generation Error: {e}")
             return []
 
-    def generate_dpo_rejection(self, prompt: str, chosen: str) -> Optional[str]:
-        """
-        Takes a generated SFT pair and generates a subtly flawed 'rejected' answer for DPO alignment.
+    def generate_dpo_rejection(self, prompt: str, chosen: str) -> str | None:
+        """Generate a subtly flawed 'rejected' answer for DPO alignment.
+
+        Args:
+            prompt: The user question from the SFT pair.
+            chosen: The correct answer from the SFT pair.
+
+        Returns:
+            A plausible but factually incorrect response, or ``None`` on failure.
         """
         system_prompt = (
             "You are an AI safety and alignment expert. Your task is to generate a 'rejected' response "
@@ -226,7 +280,7 @@ class TeacherModelSynthesizer:
             "2. It must contain a critical factual error (e.g., wrong sequence, wrong component, or subtle hallucination).\n"
             "3. It must not be cartoonishly evil or obvious; it must force the fine-tuned model to pay close attention.\n"
         )
-        user_prompt = f"User Question: \"{prompt}\"\nTrue Answer: \"{chosen}\"\n\nGenerate the plausible but factually incorrect 'rejected' response."
+        user_prompt = f'User Question: "{prompt}"\nTrue Answer: "{chosen}"\n\nGenerate the plausible but factually incorrect \'rejected\' response.'
 
         try:
             if self.provider == "openai":
@@ -235,50 +289,56 @@ class TeacherModelSynthesizer:
                 return self._anthropic_generate_dpo(system_prompt, user_prompt)
             else:
                 return self._ollama_generate_dpo(system_prompt, user_prompt)
+        except json.JSONDecodeError as e:
+            logger.warning("DPO generation returned invalid JSON: %s", e)
+            return None
         except Exception as e:
+            logger.error("DPO Generation Error: %s", e)
             print(f"DPO Generation Error: {e}")
             return None
 
-    def process_chunk(self, markdown_chunk: str) -> List[dict]:
-        """
-        Orchestrates the full pipeline for a single chunk: SFT generation -> DPO generation.
-        """
-        final_tuples = []
+    def process_chunk(self, markdown_chunk: str) -> list[dict]:
+        """Orchestrate the full pipeline for a single chunk: SFT → DPO.
 
-        # 1. Generate the valid QA pairs (Chosen)
+        Args:
+            markdown_chunk: A Docling-produced markdown text chunk.
+
+        Returns:
+            List of complete tuples with ``"prompt"``, ``"chosen"``, and
+            ``"rejected"`` keys.
+        """
+        final_tuples: list[dict] = []
+
         sft_pairs = self.generate_sft_pairs(markdown_chunk)
-
         if not sft_pairs:
-            return final_tuples  # Skip if no actionable data was found
+            return final_tuples
 
-        # 2. Generate the negative examples (Rejected)
         for pair in sft_pairs:
-            rejected_text = self.generate_dpo_rejection(pair['prompt'], pair['chosen'])
-
+            rejected_text = self.generate_dpo_rejection(pair["prompt"], pair["chosen"])
             if rejected_text:
                 final_tuples.append({
-                    "prompt": pair['prompt'],
-                    "chosen": pair['chosen'],
-                    "rejected": rejected_text
+                    "prompt": pair["prompt"],
+                    "chosen": pair["chosen"],
+                    "rejected": rejected_text,
                 })
 
         return final_tuples
 
+
 # ==============================================================================
-# Execution Example for the AI Agent
+# CLI Entry Point
 # ==============================================================================
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Teacher Model Synthetic Data Generator")
-    parser.add_argument("--model", default="gpt-4o", help="Teacher model ID (e.g., gpt-4o, claude-3-5-sonnet-20241022, llama3.1:8b)")
-    parser.add_argument("--provider", default=None, help="API provider: 'openai', 'anthropic', or 'ollama' (auto-detected from model name)")
+    parser.add_argument("--model", default="gpt-4o", help="Teacher model ID")
+    parser.add_argument("--provider", default=None, help="API provider (auto-detected)")
     parser.add_argument("--domain", default="technical documentation", help="Subject-matter domain")
     args = parser.parse_args()
 
     synthesizer = TeacherModelSynthesizer(domain=args.domain, model=args.model, provider=args.provider)
 
-    # Example chunk
     example_markdown_chunk = (
         "### [Source Context: Product User Guide]\n\n"
         "**Clearing a Paper Jam in the ADF**\n"
@@ -291,5 +351,5 @@ if __name__ == "__main__":
     generated_data = synthesizer.process_chunk(example_markdown_chunk)
 
     for i, data in enumerate(generated_data):
-        print(f"\n--- Synthetic Tuple {i+1} ---")
+        print(f"\n--- Synthetic Tuple {i + 1} ---")
         print(json.dumps(data, indent=2))

@@ -48,5 +48,6 @@ py-modules = [
     "evaluate",
     "build_dataset",
     "deduplicate_dataset",
-    "model_utils"
+    "model_utils",
+    "provider_utils"
 ]
