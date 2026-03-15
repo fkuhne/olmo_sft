@@ -173,7 +173,8 @@ def main() -> None:
     system_prompt = (
         f"You are an expert in {domain}. Your objective is to create highly complex, "
         "edge-case scenarios that test deep domain knowledge and multi-step reasoning.\n"
-        "You must focus purely on multi-step reasoning questions that require deep diagnostic logic.\n\n"
+        "You must focus purely on multi-step reasoning questions that "
+        "require deep diagnostic logic.\n\n"
         "Output exactly 10 scenarios.\n"
         'Return the output strictly in JSON format using a single key "scenarios", '
         "which contains an array of objects.\n"
@@ -207,7 +208,7 @@ def main() -> None:
         except json.JSONDecodeError as e:
             logger.warning("Batch returned invalid JSON: %s", e)
             consecutive_errors += 1
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             logger.error("Error generating batch: %s", e)
             print(f"Error generating batch: {e}")
             consecutive_errors += 1
@@ -220,7 +221,7 @@ def main() -> None:
     scenarios = scenarios[: args.count]
 
     print(f"Saving to {args.output}...")
-    with open(args.output, "w") as f:
+    with open(args.output, "w", encoding="utf-8") as f:
         for scenario in scenarios:
             f.write(json.dumps(scenario) + "\n")
 

@@ -38,7 +38,7 @@ class DatasetBuilder:
         domain: Subject-matter domain for prompt context.
     """
 
-    def __init__(
+    def __init__( # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         input_dir: str = "./manuals",
         output_file: str = "alignment_dataset.jsonl",
@@ -94,9 +94,9 @@ class DatasetBuilder:
 
         for i, pdf_path in enumerate(pdf_files):
             device_context = self.extract_device_context(pdf_path)
-            print(f"============================================================")
+            print("============================================================")
             print(f"Processing Manual {i + 1}/{len(pdf_files)}: {device_context}")
-            print(f"============================================================")
+            print("============================================================")
 
             try:
                 # Step 1: Extract and Chunk (Docling)
@@ -105,11 +105,14 @@ class DatasetBuilder:
                 # Step 2: Iterate through every chunk
                 for j, chunk in enumerate(enriched_chunks):
                     total_chunks_processed += 1
-                    print(f"  -> Synthesizing chunk {j + 1}/{len(enriched_chunks)}...", end=" ", flush=True)
+                    print(
+                        f"  -> Synthesizing chunk {j + 1}/{len(enriched_chunks)}...", 
+                        end=" ", flush=True
+                    )
 
                     try:
                         generated_tuples = self.synthesizer.process_chunk(chunk)
-                    except Exception as e:
+                    except Exception as e: # pylint: disable=broad-exception-caught
                         logger.warning(
                             "Chunk %d/%d failed in %s: %s",
                             j + 1, len(enriched_chunks), device_context, e,
@@ -134,7 +137,7 @@ class DatasetBuilder:
                     # Brief pause to avoid API rate limits
                     time.sleep(1)
 
-            except Exception as e:
+            except Exception as e: # pylint: disable=broad-exception-caught
                 logger.error("Critical error processing %s: %s", pdf_path, e)
                 print(f"\nCRITICAL ERROR processing {pdf_path}: {e}")
                 print("Skipping to the next manual to preserve pipeline execution...")
@@ -157,12 +160,18 @@ class DatasetBuilder:
 # CLI Entry Point
 # ==============================================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Phase 2: Build training dataset from PDF manuals")
+    parser = argparse.ArgumentParser(
+        description="Phase 2: Build training dataset from PDF manuals"
+    )
     parser.add_argument("--model", default="gpt-4o", help="Teacher model ID")
     parser.add_argument("--provider", default=None, help="API provider (auto-detected)")
     parser.add_argument("--domain", default="technical documentation", help="Subject-matter domain")
-    parser.add_argument("--input-dir", default="./manuals", help="Directory containing PDF manuals")
-    parser.add_argument("--output", default="alignment_dataset.jsonl", help="Output JSONL file path")
+    parser.add_argument(
+        "--input-dir", default="./manuals", help="Directory containing PDF manuals"
+    )
+    parser.add_argument(
+        "--output", default="alignment_dataset.jsonl", help="Output JSONL file path"
+    )
     args = parser.parse_args()
 
     os.makedirs(args.input_dir, exist_ok=True)

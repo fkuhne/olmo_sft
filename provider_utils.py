@@ -70,6 +70,7 @@ def build_client(
         ImportError: If the ``anthropic`` package is not installed.
     """
     if provider == "openai":
+        # pylint: disable=import-outside-toplevel
         from openai import OpenAI
 
         key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -81,12 +82,13 @@ def build_client(
 
     if provider == "anthropic":
         try:
+            # pylint: disable=import-outside-toplevel
             import anthropic
-        except ImportError:
+        except ImportError as exc:
             raise ImportError(
                 "The 'anthropic' package is required for Anthropic models. "
                 "Run: uv pip install anthropic"
-            )
+            ) from exc
         key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not key:
             raise ValueError(
@@ -95,6 +97,7 @@ def build_client(
         return anthropic.Anthropic(api_key=key)
 
     if provider == "ollama":
+        # pylint: disable=import-outside-toplevel
         from openai import OpenAI
 
         url = base_url or os.environ.get("OLLAMA_BASE_URL", OLLAMA_DEFAULT_BASE_URL)
@@ -132,7 +135,7 @@ def retry_on_rate_limit(
             for attempt in range(max_retries + 1):
                 try:
                     return func(*args, **kwargs)
-                except Exception as exc:
+                except Exception as exc: # pylint: disable=broad-exception-caught
                     # Check if this is a rate-limit error we should retry
                     if _is_rate_limit_error(exc) and attempt < max_retries:
                         delay = base_delay * (2**attempt)

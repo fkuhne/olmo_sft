@@ -45,12 +45,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset", type=str, default="alignment_dataset.jsonl")
     parser.add_argument("--eval-dataset", type=str, default="golden_eval.jsonl")
     parser.add_argument("--output", type=str, default="./doctune-dpo")
-    parser.add_argument("--betas", type=float, nargs="+", default=[0.1, 0.25], help="DPO beta values to sweep")
-    parser.add_argument("--lrs", type=float, nargs="+", default=[5e-6, 1e-6], help="Learning rates to sweep")
+    parser.add_argument(
+        "--betas", type=float, nargs="+", default=[0.1, 0.25], 
+        help="DPO beta values to sweep"
+    )
+    parser.add_argument(
+        "--lrs", type=float, nargs="+", default=[5e-6, 1e-6], 
+        help="Learning rates to sweep"
+    )
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> None: # pylint: disable=too-many-locals
     """Entry point for DPO training with hyperparameter sweep."""
     args = parse_args()
 
@@ -104,12 +110,13 @@ def main() -> None:
                 warmup_ratio=0.1,
                 logging_steps=10,
                 save_strategy="epoch",
-                evaluation_strategy="epoch",
+                eval_strategy="epoch", # Changed from evaluation_strategy
                 bf16=True,
                 max_grad_norm=0.3,
                 remove_unused_columns=False,
             )
 
+            # pylint: disable=unexpected-keyword-arg
             trainer = DPOTrainer(
                 model=model,
                 ref_model=None,

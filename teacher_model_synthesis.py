@@ -64,7 +64,7 @@ class TeacherModelSynthesizer:
         ollama_base_url: Custom Ollama server URL.
     """
 
-    def __init__(
+    def __init__( # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         domain: str = "technical documentation",
         api_key: str | None = None,
@@ -132,7 +132,9 @@ class TeacherModelSynthesizer:
     # Anthropic implementation (JSON mode with manual Pydantic parsing)
     # --------------------------------------------------------------------------
     @retry_on_rate_limit()
-    def _anthropic_call(self, system_prompt: str, user_prompt: str, temperature: float = 0.3) -> str:
+    def _anthropic_call(
+        self, system_prompt: str, user_prompt: str, temperature: float = 0.3
+    ) -> str:
         """Make an Anthropic API call and return the text content.
 
         Args:
@@ -237,27 +239,32 @@ class TeacherModelSynthesizer:
         """
         system_prompt = (
             f"You are an expert technical writer and data synthesizer for {self.domain}. "
-            "Your task is to read documentation and generate highly accurate, realistic user questions "
+            "Your task is to read documentation and generate highly accurate, "
+            "realistic user questions "
             "and their corresponding step-by-step solutions.\n\n"
             "Strict Rules:\n"
-            "1. Do NOT hallucinate or use external knowledge. The answer must be derived strictly from the text.\n"
+            "1. Do NOT hallucinate or use external knowledge. The answer must be "
+            "derived strictly from the text.\n"
             "2. If the text lacks actionable or 'how-to' information, output an empty array.\n"
-            "3. Generate questions from multiple angles (e.g., direct action, symptom-based, clarification).\n"
+            "3. Generate questions from multiple angles (e.g., direct action, "
+            "symptom-based, clarification).\n"
             "4. Always reference the specific source context in the chosen response."
         )
-        user_prompt = f'Text Chunk:\n"""{markdown_chunk}"""\n\nGenerate 2 to 3 Question-Answer pairs.'
+        user_prompt = (
+            f'Text Chunk:\n"""{markdown_chunk}"""\n\n'
+            'Generate 2 to 3 Question-Answer pairs.'
+        )
 
         try:
             if self.provider == "openai":
                 return self._openai_generate_sft(system_prompt, user_prompt)
-            elif self.provider == "anthropic":
+            if self.provider == "anthropic":
                 return self._anthropic_generate_sft(system_prompt, user_prompt)
-            else:
-                return self._ollama_generate_sft(system_prompt, user_prompt)
+            return self._ollama_generate_sft(system_prompt, user_prompt)
         except json.JSONDecodeError as e:
             logger.warning("SFT generation returned invalid JSON: %s", e)
             return []
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             logger.error("SFT Generation Error: %s", e)
             print(f"SFT Generation Error: {e}")
             return []
@@ -273,26 +280,30 @@ class TeacherModelSynthesizer:
             A plausible but factually incorrect response, or ``None`` on failure.
         """
         system_prompt = (
-            "You are an AI safety and alignment expert. Your task is to generate a 'rejected' response "
-            "for a technical support question.\n\n"
+            "You are an AI safety and alignment expert. Your task is to generate a 'rejected' "
+            "response for a technical support question.\n\n"
             "Strict Rules:\n"
             "1. It must look highly plausible and confidently written.\n"
-            "2. It must contain a critical factual error (e.g., wrong sequence, wrong component, or subtle hallucination).\n"
-            "3. It must not be cartoonishly evil or obvious; it must force the fine-tuned model to pay close attention.\n"
+            "2. It must contain a critical factual error "
+            "(e.g., wrong sequence, wrong component, or subtle hallucination).\n"
+            "3. It must not be cartoonishly evil or obvious; it must force the fine-tuned model "
+            "to pay close attention.\n"
         )
-        user_prompt = f'User Question: "{prompt}"\nTrue Answer: "{chosen}"\n\nGenerate the plausible but factually incorrect \'rejected\' response.'
+        user_prompt = (
+            f'User Question: "{prompt}"\nTrue Answer: "{chosen}"\n\n'
+            "Generate the plausible but factually incorrect 'rejected' response."
+        )
 
         try:
             if self.provider == "openai":
                 return self._openai_generate_dpo(system_prompt, user_prompt)
-            elif self.provider == "anthropic":
+            if self.provider == "anthropic":
                 return self._anthropic_generate_dpo(system_prompt, user_prompt)
-            else:
-                return self._ollama_generate_dpo(system_prompt, user_prompt)
+            return self._ollama_generate_dpo(system_prompt, user_prompt)
         except json.JSONDecodeError as e:
             logger.warning("DPO generation returned invalid JSON: %s", e)
             return None
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             logger.error("DPO Generation Error: %s", e)
             print(f"DPO Generation Error: {e}")
             return None
@@ -337,9 +348,11 @@ if __name__ == "__main__":
     parser.add_argument("--domain", default="technical documentation", help="Subject-matter domain")
     args = parser.parse_args()
 
-    synthesizer = TeacherModelSynthesizer(domain=args.domain, model=args.model, provider=args.provider)
+    synthesizer = TeacherModelSynthesizer(
+        domain=args.domain, model=args.model, provider=args.provider
+    )
 
-    example_markdown_chunk = (
+    EXAMPLE_MARKDOWN_CHUNK = (
         "### [Source Context: Product User Guide]\n\n"
         "**Clearing a Paper Jam in the ADF**\n"
         "1. Lift the document feeder cover.\n"
@@ -348,7 +361,7 @@ if __name__ == "__main__":
     )
 
     print("Synthesizing SFT and DPO data...")
-    generated_data = synthesizer.process_chunk(example_markdown_chunk)
+    generated_data = synthesizer.process_chunk(EXAMPLE_MARKDOWN_CHUNK)
 
     for i, data in enumerate(generated_data):
         print(f"\n--- Synthetic Tuple {i + 1} ---")

@@ -126,7 +126,8 @@ if __name__ == "__main__":
         },
         {
             "prompt": "Why is my device not connecting to the 5GHz Wi-Fi network?",
-            "chosen": "Ensure your router is broadcasting a 2.4GHz band, as many older devices do not support 5GHz...",
+            "chosen": "Ensure your router is broadcasting a 2.4GHz band, as "
+                      "many older devices do not support 5GHz...",
             "rejected": "Devices do not use Wi-Fi, you must use a USB cable.",
         },
         {

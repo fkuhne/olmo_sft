@@ -12,7 +12,7 @@ import re
 import logging
 
 import torch
-import torch.nn as nn
+from torch import nn
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ def detect_attn_implementation() -> str:
         otherwise ``"eager"``.
     """
     try:
+        # pylint: disable=import-outside-toplevel,unused-import
         import flash_attn  # noqa: F401
         print("Flash Attention 2 detected — using flash_attention_2.")
         return "flash_attention_2"
@@ -153,7 +154,7 @@ def format_prompt_for_eval(tokenizer: AutoTokenizer, prompt_text: str) -> str:
             return tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-        except Exception:
+        except Exception: # pylint: disable=broad-exception-caught
             pass  # Fall through to generic format
 
     return f"User: {prompt_text}\nAssistant: "

@@ -14,7 +14,7 @@ import os
 logger = logging.getLogger(__name__)
 
 
-class DoclingManualExtractor:
+class DoclingManualExtractor: # pylint: disable=too-few-public-methods
     """Extracts and chunks PDF documents using IBM Docling.
 
     Uses DocLayNet-based ML models to understand the visual structure
@@ -24,6 +24,7 @@ class DoclingManualExtractor:
 
     def __init__(self) -> None:
         """Initialize the Docling converter and hierarchical chunker."""
+        # pylint: disable=import-outside-toplevel
         from docling.document_converter import DocumentConverter
         from docling.chunking import HierarchicalChunker
 
@@ -68,7 +69,7 @@ class DoclingManualExtractor:
             logger.error("Permission denied reading PDF: %s", pdf_path)
             print(f"ERROR: Permission denied reading PDF: {pdf_path}")
             return []
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             logger.error(
                 "PDF parsing failed for %s: %s: %s",
                 pdf_path, type(e).__name__, e,
@@ -79,7 +80,7 @@ class DoclingManualExtractor:
         # 2. Semantic Chunking
         try:
             chunks = self.chunker.chunk(conv_result.document)
-        except Exception as e:
+        except Exception as e: # pylint: disable=broad-exception-caught
             logger.error("Chunking failed for %s: %s", pdf_path, e)
             print(f"ERROR: Chunking failed for {pdf_path}: {e}")
             return []
@@ -109,15 +110,15 @@ class DoclingManualExtractor:
 if __name__ == "__main__":
     extractor = DoclingManualExtractor()
 
-    target_pdf = "example_manual.pdf"
-    source_name = "Product User Guide"
+    TARGET_PDF = "example_manual.pdf"
+    SOURCE_NAME = "Product User Guide"
 
-    if os.path.exists(target_pdf):
-        enriched_chunks = extractor.process_manual(target_pdf, source_name)
+    if os.path.exists(TARGET_PDF):
+        enriched_chunks = extractor.process_manual(TARGET_PDF, SOURCE_NAME)
 
         if enriched_chunks:
             print("\n--- PREVIEW OF DOCLING CHUNK 1 ---")
             print(enriched_chunks[0])
             print("----------------------------------")
     else:
-        print(f"Awaiting PDF file: {target_pdf}")
+        print(f"Awaiting PDF file: {TARGET_PDF}")

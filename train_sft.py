@@ -91,6 +91,7 @@ def main() -> None:
 
     # 4. Training Arguments
     run_name = derive_run_name(args.model_id, "sft")
+    # pylint: disable=duplicate-code
     training_args = TrainingArguments(
         output_dir=args.output,
         run_name=run_name,
@@ -105,12 +106,13 @@ def main() -> None:
         warmup_ratio=0.1,
         logging_steps=10,
         save_strategy="epoch",
-        evaluation_strategy="epoch",
+        eval_strategy="epoch", # Changed from evaluation_strategy
         fp16=False,
         bf16=True,
         max_grad_norm=0.3,
     )
 
+    # pylint: disable=unexpected-keyword-arg
     # 5. Initialize & Run SFTTrainer
     trainer = SFTTrainer(
         model=model,
