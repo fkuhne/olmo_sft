@@ -44,6 +44,9 @@ hp_alignment_dataset.jsonl
 alignment_dataset.jsonl
 golden_eval.jsonl
 
+# Pipeline cache
+.cache/
+
 # Jupyter
 .ipynb_checkpoints/
 eval_results.json
