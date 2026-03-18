@@ -52,3 +52,8 @@ py-modules = [
     "model_utils",
     "provider_utils"
 ]
+
+[tool.uv]
+extra-build-dependencies = [
+    "torch",
+]
