@@ -59,6 +59,7 @@ class DatasetBuilder:
         cache_dir: str = ".cache",
         no_cache: bool = False,
         extract_only: bool = False,
+        docling_page_batch_size: int | None = None,
     ) -> None:
         self.input_dir = input_dir
         self.output_file = output_file
@@ -66,7 +67,9 @@ class DatasetBuilder:
         self.no_cache = no_cache
 
         print("--- INITIALIZING PHASE 2 PIPELINE ---")
-        self.extractor = DoclingManualExtractor()
+        self.extractor = DoclingManualExtractor(
+            page_batch_size=docling_page_batch_size,
+        )
 
         # Cache setup
         self.cache: PipelineCache | None = None
@@ -304,6 +307,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Run only Docling extraction, save chunks to cache, then exit",
     )
+    parser.add_argument(
+        "--docling-page-batch-size",
+        type=int,
+        default=None,
+        help=(
+            "Pages per Docling conversion batch. Lower values reduce memory spikes "
+            "on large PDFs (default: env DOCTUNE_DOCLING_PAGE_BATCH_SIZE or 25)."
+        ),
+    )
     args = parser.parse_args()
 
     os.makedirs(args.input_dir, exist_ok=True)
@@ -317,6 +329,7 @@ if __name__ == "__main__":
         cache_dir=args.cache_dir,
         no_cache=args.no_cache,
         extract_only=args.extract_only,
+        docling_page_batch_size=args.docling_page_batch_size,
     )
 
     builder.build()

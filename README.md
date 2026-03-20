@@ -79,6 +79,34 @@ python generate_golden_eval.py
 
 Then transfer the generated `alignment_dataset.jsonl` and `golden_eval.jsonl` to your GPU environment for training.
 
+### Optional: Enable GPU OCR for Docling (Windows + NVIDIA)
+
+By default, many local installs resolve to CPU-only PyTorch wheels. If you want
+Docling/RapidOCR OCR stages to use NVIDIA CUDA, install a CUDA-enabled wheel:
+
+```bash
+# In your activated .venv
+uv pip install --python .venv/Scripts/python.exe --upgrade \
+      torch torchvision torchaudio \
+      --index-url https://download.pytorch.org/whl/cu124
+
+# Verify GPU visibility
+.venv/Scripts/python.exe -c "import torch; print(torch.__version__); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no cuda')"
+```
+
+`pdf_extractor.py` now uses RapidOCR with the `torch` backend and has device
+guards:
+
+- `DOCTUNE_DOCLING_USE_GPU=auto` (default): Use `cuda:0` when available, else CPU.
+- `DOCTUNE_DOCLING_USE_GPU=cpu`: Force CPU execution.
+- `DOCTUNE_DOCLING_USE_GPU=cuda` or `cuda:0`: Force GPU; falls back to CPU if unavailable.
+
+On low-VRAM GPUs, keep extraction stable by lowering page batch size:
+
+```bash
+python build_dataset.py --extract-only --docling-page-batch-size 5
+```
+
 ### Option C: Full Pipeline (GPU Required)
 
 ```bash
