@@ -7,7 +7,7 @@
 # (CPU), and OpenAI/Anthropic API calls.
 #
 # For GPU-dependent phases (3–6: SFT, DPO, Evaluation, Deployment), use
-# runpod_setup.sh on a provisioned GPU pod instead.
+# setup/runpod_setup.sh on a provisioned GPU pod instead.
 # ==============================================================================
 
 set -e  # Exit immediately if a command exits with a non-zero status
@@ -49,11 +49,11 @@ echo ""
 echo "  2. Place your PDF files in the ./manuals/ directory"
 echo ""
 echo "  3. Run the data generation pipeline:"
-echo "     python build_dataset.py"
-echo "     # or: python build_dataset.py --model claude-3-5-sonnet-20241022"
+echo "     python -m doctune.data.build_dataset"
+echo "     # or: python -m doctune.data.build_dataset --model claude-3-5-sonnet-20241022"
 echo ""
 echo "  4. (Optional) Generate the golden evaluation set:"
-echo "     python generate_golden_eval.py"
+echo "     python -m doctune.eval.generate_golden_eval"
 echo ""
 echo "  5. Transfer the generated .jsonl files to your GPU pod for Phases 3–6"
 echo "========================================================================"

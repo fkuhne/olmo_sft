@@ -5,7 +5,7 @@
 # ==============================================================================
 # This script sets up the remote GPU pod for training, alignment, evaluation,
 # and deployment. Phase 2 (data curation) can be done locally — see
-# local_setup.sh for the local alternative.
+# setup/local_setup.sh for the local alternative.
 # ==============================================================================
 
 set -e # Exit immediately if a command exits with a non-zero status
@@ -46,7 +46,7 @@ echo "Directory /workspace/doctune is prepped for training."
 echo ""
 echo "Next steps:"
 echo "  export MODEL_ID=\"your-hf-model-id\"  # e.g. meta-llama/Llama-3.1-8B"
-echo "  python train_sft.py --model-id \$MODEL_ID"
+echo "  python -m doctune.training.train_sft --model-id \$MODEL_ID"
 echo "========================================================================"
 
 # Launch MLflow UI in the background
