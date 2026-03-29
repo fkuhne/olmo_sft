@@ -16,6 +16,16 @@ from sentence_transformers import SentenceTransformer, util
 
 logger = logging.getLogger(__name__)
 
+_embedding_model: SentenceTransformer | None = None
+
+
+def _get_embedding_model() -> SentenceTransformer:
+    """Return the shared sentence-transformer model, loading it on first call."""
+    global _embedding_model  # noqa: PLW0603
+    if _embedding_model is None:
+        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+    return _embedding_model
+
 _REQUIRED_KEYS = ("prompt", "chosen", "rejected")
 
 
@@ -33,7 +43,7 @@ class DatasetFilter:
 
     def __init__(self, similarity_threshold: float = 0.85) -> None:
         print("Loading Embedding Model...")
-        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.model = _get_embedding_model()
         self.similarity_threshold = similarity_threshold
 
         self.accepted_data: list[dict] = []
@@ -107,6 +117,79 @@ class DatasetFilter:
         Path(output_path).write_text(content, encoding="utf-8")
         logger.info("Saved %d QA pairs to %s", len(self.accepted_data), output_path)
         print(f"Saved {len(self.accepted_data)} highly diverse QA pairs to {output_path}.")
+
+
+class ChunkFilter:
+    """Deduplicates source chunks by cosine similarity before synthesis.
+
+    Maintains an in-memory vector store of accepted chunk embeddings.
+    A chunk is rejected if its cosine similarity to any previously accepted
+    chunk exceeds ``similarity_threshold``.
+
+    This gate fires *before* teacher-model synthesis, so duplicate source
+    material never reaches the API.  It is intentionally more permissive
+    than the downstream prompt-level ``DatasetFilter`` (lower threshold)
+    because raw chunk text scores higher surface similarity than generated
+    questions, even when the underlying content is genuinely distinct.
+
+    Args:
+        similarity_threshold: Maximum cosine similarity allowed between
+            any two accepted chunks (default ``0.82``).
+    """
+
+    def __init__(self, similarity_threshold: float = 0.82) -> None:
+        self.model = _get_embedding_model()
+        self.similarity_threshold = similarity_threshold
+        self.accepted_embeddings: torch.Tensor | None = None
+        self._accepted_count: int = 0
+        self._rejected_count: int = 0
+
+    def is_duplicate(self, chunk_text: str) -> bool:
+        """Return ``True`` if *chunk_text* is too similar to a previously seen chunk.
+
+        Side-effect: if the chunk is accepted (not a duplicate), its embedding
+        is added to the internal vector store so future chunks are compared
+        against it.
+
+        Args:
+            chunk_text: Raw markdown chunk string from the extractor.
+
+        Returns:
+            ``True`` if the chunk should be skipped, ``False`` if it is novel
+            enough to proceed to synthesis.
+        """
+        embedding = self.model.encode(chunk_text, convert_to_tensor=True)
+
+        if self.accepted_embeddings is None:
+            self.accepted_embeddings = embedding.unsqueeze(0)
+            self._accepted_count += 1
+            return False
+
+        scores = util.cos_sim(embedding, self.accepted_embeddings)[0]
+        max_similarity: float = torch.max(scores).item()
+
+        if max_similarity > self.similarity_threshold:
+            logger.info(
+                "Chunk duplicate dropped (similarity=%.3f > threshold=%.2f).",
+                max_similarity,
+                self.similarity_threshold,
+            )
+            self._rejected_count += 1
+            return True
+
+        self.accepted_embeddings = torch.cat(
+            (self.accepted_embeddings, embedding.unsqueeze(0)), dim=0,
+        )
+        self._accepted_count += 1
+        return False
+
+    def log_summary(self) -> None:
+        """Print accepted/rejected counts to stdout."""
+        total = self._accepted_count + self._rejected_count
+        print(
+            f"  [Chunk dedup] {self._accepted_count}/{total} chunks passed "
+            f"(threshold={self.similarity_threshold})."
+        )
 
 
 # ==============================================================================

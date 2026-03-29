@@ -31,7 +31,7 @@ from doctune.data.pipeline.pipeline_utils import (
     extract_device_context,
     init_extractor_and_cache,
 )
-from doctune.data.synthesis.deduplicate_dataset import DatasetFilter
+from doctune.data.synthesis.deduplicate_dataset import ChunkFilter, DatasetFilter
 from doctune.data.synthesis.teacher_model_synthesis import TeacherModelSynthesizer
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,7 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
             provider=provider,
         )
         self.filter = DatasetFilter(similarity_threshold=0.85)
+        self.chunk_filter = ChunkFilter(similarity_threshold=0.82)
 
     # ------------------------------------------------------------------
     # Cache helper
@@ -145,6 +146,7 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
                 print("Skipping to the next manual to preserve pipeline execution...")
 
         stats.log_summary(unique_pairs=len(self.filter.accepted_data))
+        self.chunk_filter.log_summary()
         self.filter.save_dataset(self.output_file)
 
     def _process_single_pdf(
@@ -193,6 +195,17 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
             # Skip chunks already completed in a previous run
             if j in completed_indices:
                 stats.total_chunks_processed += 1
+                continue
+
+            # Gate 1 — chunk-level dedup (fires before any API call)
+            if self.chunk_filter.is_duplicate(chunk):
+                print(
+                    f"  -> Chunk {j + 1}/{len(enriched_chunks)} "
+                    f"[DUPLICATE SOURCE — skipped]"
+                )
+                stats.total_chunks_processed += 1
+                # Cache an empty result so this chunk is skipped on resume too.
+                self._cache_synthesis(pdf_hash, j, [])
                 continue
 
             stats.total_chunks_processed += 1
