@@ -204,6 +204,25 @@ class DoclingManualExtractor: # pylint: disable=too-few-public-methods
             if "rapidocr" in name.lower() and isinstance(obj, logging.Logger):
                 _silence(obj)
 
+    @staticmethod
+    def _build_section_breadcrumb(chunk: object) -> str:
+        """Build a ' > '-joined breadcrumb from Docling chunk heading metadata.
+
+        Args:
+            chunk: A Docling ``DocChunk`` produced by ``HybridChunker`` or
+                ``HierarchicalChunker``.  The method is defensive against
+                missing or malformed metadata.
+
+        Returns:
+            A breadcrumb string such as ``"Chapter 3: Connectivity > Wi-Fi Setup"``,
+            or an empty string if no heading metadata is available.
+        """
+        try:
+            headings: list[str] = getattr(chunk.meta, "headings", None) or []
+            return " > ".join(h.strip() for h in headings if h and h.strip())
+        except Exception:  # noqa: BLE001
+            return ""
+
     def _reset_converter(self, reason: str) -> None:
         """Reinitialize Docling converter to recover from native pipeline failures."""
         logger.warning("Reinitializing Docling converter: %s", reason)
@@ -412,8 +431,12 @@ class DoclingManualExtractor: # pylint: disable=too-few-public-methods
                 if len(raw_text.strip()) < 100:
                     continue
 
+                breadcrumb = self._build_section_breadcrumb(chunk)
+                section_tag = (
+                    f" [Section: {breadcrumb}]" if breadcrumb else ""
+                )
                 enriched_chunk = (
-                    f"### [Source Context: {device_context}]\n\n"
+                    f"### [Source Context: {device_context}]{section_tag}\n\n"
                     f"{raw_text}\n"
                 )
                 final_dataset_chunks.append(enriched_chunk)

@@ -327,7 +327,14 @@ class TeacherModelSynthesizer:
             "2. If the text lacks actionable or 'how-to' information, output an empty array.\n"
             "3. Generate questions from multiple angles (e.g., direct action, "
             "symptom-based, clarification).\n"
-            "4. Always reference the specific source context in the chosen response."
+            "4. The chunk header contains a [Source Context] and, when available, "
+            "a [Section] breadcrumb showing exactly where in the document this text "
+            "appears. Use the most specific heading in that breadcrumb to ground "
+            "both the question and the answer — prefer section-specific language "
+            "over generic phrases like 'the manual' or 'the document'.\n"
+            "5. If a [Section] breadcrumb is present, at least one question must "
+            "be answerable only by someone who knows which section it comes from "
+            "(i.e. include a section-specific detail in the question itself)."
         )
         user_prompt = (
             f'Text Chunk:\n"""{markdown_chunk}"""\n\n'
