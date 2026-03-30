@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import argparse
 import logging
+from dataclasses import dataclass, field
+from typing import Any
 
 from peft import PeftModel
 from trl import DPOTrainer
@@ -36,6 +38,26 @@ from doctune.utils.model_utils import (
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class _SweepResult:
+    """Holds the outcome of a single DPO sweep run."""
+    run_name: str
+    beta: float
+    lr: float
+    eval_loss: float
+    rewards_chosen: float    # mean reward margin on chosen responses
+    rewards_rejected: float  # mean reward margin on rejected responses
+    reward_margin: float     # chosen - rejected (higher = better separation)
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    def __str__(self) -> str:
+        return (
+            f"{self.run_name} | β={self.beta} lr={self.lr:.0e} | "
+            f"eval_loss={self.eval_loss:.4f} | "
+            f"reward_margin={self.reward_margin:.4f}"
+        )
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments for DPO training.
 
@@ -46,7 +68,7 @@ def parse_args() -> argparse.Namespace:
     add_common_train_args(parser)
     parser.add_argument("--sft-adapter", type=str, default="./doctune-sft")
     parser.add_argument(
-        "--betas", type=float, nargs="+", default=[0.1, 0.25],
+        "--betas", type=float, nargs="+", default=[0.05, 0.1, 0.25, 0.5],
         help="DPO beta values to sweep",
     )
     parser.add_argument(
@@ -54,6 +76,103 @@ def parse_args() -> argparse.Namespace:
         help="Learning rates to sweep",
     )
     return parser.parse_args()
+
+
+def _extract_sweep_result(
+    trainer: DPOTrainer,
+    run_name: str,
+    beta: float,
+    lr: float,
+) -> _SweepResult:
+    """Extract final eval metrics from a completed DPOTrainer run.
+
+    DPOTrainer exposes reward margins as ``rewards/chosen`` and
+    ``rewards/rejected`` in its log history. These are the primary
+    signal for sweep comparison: a higher margin means the model more
+    clearly separates preferred from dis-preferred responses.
+
+    Args:
+        trainer: The completed ``DPOTrainer`` instance (before deletion).
+        run_name: Human-readable run identifier for logging.
+        beta: The β value used in this run.
+        lr: The learning rate used in this run.
+
+    Returns:
+        Populated ``_SweepResult`` dataclass.
+    """
+    eval_logs = [
+        entry for entry in trainer.state.log_history
+        if "eval_loss" in entry
+    ]
+    last_eval = eval_logs[-1] if eval_logs else {}
+
+    eval_loss        = last_eval.get("eval_loss", float("inf"))
+    rewards_chosen   = last_eval.get("eval_rewards/chosen", 0.0)
+    rewards_rejected = last_eval.get("eval_rewards/rejected", 0.0)
+    reward_margin    = rewards_chosen - rewards_rejected
+
+    try:
+        import mlflow  # noqa: PLC0415
+        with mlflow.start_run(run_name=run_name, nested=True):
+            mlflow.log_params({"beta": beta, "lr": lr})
+            mlflow.log_metrics({
+                "eval_loss":        eval_loss,
+                "rewards_chosen":   rewards_chosen,
+                "rewards_rejected": rewards_rejected,
+                "reward_margin":    reward_margin,
+            })
+    except Exception as e:  # noqa: BLE001
+        logger.warning("MLflow logging failed for %s: %s", run_name, e)
+
+    return _SweepResult(
+        run_name=run_name,
+        beta=beta,
+        lr=lr,
+        eval_loss=eval_loss,
+        rewards_chosen=rewards_chosen,
+        rewards_rejected=rewards_rejected,
+        reward_margin=reward_margin,
+        extra=last_eval,
+    )
+
+
+def _log_sweep_summary(results: list[_SweepResult]) -> None:
+    """Print a ranked sweep summary and tag the best run in MLflow.
+
+    Ranks runs by ``reward_margin`` descending (primary) and
+    ``eval_loss`` ascending (tiebreak).
+
+    Args:
+        results: All ``_SweepResult`` instances from the sweep.
+    """
+    if not results:
+        return
+
+    ranked = sorted(results, key=lambda r: (-r.reward_margin, r.eval_loss))
+    best = ranked[0]
+
+    print("\n" + "=" * 60)
+    print("DPO SWEEP COMPLETE — RESULTS RANKED BY REWARD MARGIN")
+    print("=" * 60)
+    for i, r in enumerate(ranked, 1):
+        marker = "  <- BEST" if i == 1 else ""
+        print(f"  {i}. {r}{marker}")
+    print("=" * 60)
+    print(f"  Best adapter saved to: ./{best.run_name}")
+    print("=" * 60 + "\n")
+
+    logger.info("Best DPO run: %s", best)
+
+    try:
+        import mlflow  # noqa: PLC0415
+        mlflow.set_tags({
+            "dpo_best_run":    best.run_name,
+            "dpo_best_beta":   str(best.beta),
+            "dpo_best_lr":     str(best.lr),
+            "dpo_best_margin": f"{best.reward_margin:.4f}",
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning("MLflow summary tagging failed: %s", e)
 
 
 def main() -> None:
@@ -87,6 +206,7 @@ def main() -> None:
     dpo_eval_dataset = eval_dataset.map(format_dpo_dataset)
 
     # 4. Hyperparameter Sweep
+    sweep_results: list[_SweepResult] = []
     base_run_name = derive_run_name(args.model_id, "dpo")
 
     for beta_val in args.betas:
@@ -122,9 +242,16 @@ def main() -> None:
             trainer.save_model(output_dir)
             logger.info("Alignment complete for %s. Saved to %s", run_name, output_dir)
 
+            result = _extract_sweep_result(trainer, run_name, beta_val, lr_val)
+            sweep_results.append(result)
+            logger.info("Sweep run complete: %s", result)
+            print(f"  [SWEEP] {result}")
+
             # Free trainer memory between sweeps
             del trainer
             clear_gpu_cache()
+
+    _log_sweep_summary(sweep_results)
 
     # Final cleanup
     del model, base_model
