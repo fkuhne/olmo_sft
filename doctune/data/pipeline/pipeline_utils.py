@@ -125,6 +125,20 @@ def add_common_cli_args(parser: argparse.ArgumentParser) -> None:
         "--no-cache", action="store_true",
         help="Disable caching (fresh run every time)",
     )
+    parser.add_argument(
+        "--chunk-sim-threshold", type=float, default=0.82,
+        help=(
+            "Cosine similarity threshold for chunk-level deduplication "
+            "(default 0.82). Lower values are more aggressive."
+        ),
+    )
+    parser.add_argument(
+        "--pair-sim-threshold", type=float, default=0.92,
+        help=(
+            "Cosine similarity threshold for prompt-level deduplication "
+            "(default 0.92). Lower values are more aggressive."
+        ),
+    )
 
 
 def add_extraction_cli_args(parser: argparse.ArgumentParser) -> None:

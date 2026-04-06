@@ -37,6 +37,9 @@ from doctune.data.synthesis.teacher_model_synthesis import TeacherModelSynthesiz
 
 logger = logging.getLogger(__name__)
 
+# Brief inter-chunk pause to avoid API burst rate limits.
+_INTER_CHUNK_SLEEP_S = 1.0
+
 
 @dataclass
 class _BuildStats:  # pylint: disable=too-few-public-methods
@@ -76,6 +79,12 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
         domain: Subject-matter domain for prompt context.
         extractor: Pre-initialised Docling extractor.
         cache: Optional pipeline cache (``None`` disables caching).
+        diversity_ratio: Fraction of chunks to keep after diversity
+            selection (``None`` to disable, default ``0.7``).
+        chunk_sim_threshold: Cosine similarity threshold for chunk-level
+            deduplication (default ``0.82``).
+        pair_sim_threshold: Cosine similarity threshold for prompt-level
+            deduplication (default ``0.92``).
     """
 
     def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
@@ -88,6 +97,8 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
         extractor: DoclingManualExtractor | None,
         cache: PipelineCache | None,
         diversity_ratio: float | None = 0.7,
+        chunk_sim_threshold: float = 0.82,
+        pair_sim_threshold: float = 0.92,
     ) -> None:
         self.input_dir = input_dir
         self.output_file = output_file
@@ -100,8 +111,8 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
             model=model,
             provider=provider,
         )
-        self.filter = DatasetFilter(similarity_threshold=0.92)
-        self.chunk_filter = ChunkFilter(similarity_threshold=0.82)
+        self.filter = DatasetFilter(similarity_threshold=pair_sim_threshold)
+        self.chunk_filter = ChunkFilter(similarity_threshold=chunk_sim_threshold)
         self.diversity_selector: DiversitySelector | None = (
             DiversitySelector(diversity_ratio=diversity_ratio)
             if diversity_ratio is not None
@@ -117,6 +128,138 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
         """Persist synthesis results to the cache if caching is enabled."""
         if self.cache is not None and pdf_hash is not None:
             self.cache.append_synthesis_result(pdf_hash, chunk_index, results)
+
+    # ------------------------------------------------------------------
+    # Private pipeline stages
+    # ------------------------------------------------------------------
+    def _resume_from_cache(
+        self,
+        pdf_hash: str | None,
+        enriched_chunks: list[str],
+        stats: _BuildStats,
+    ) -> set[int]:
+        """Re-ingest cached synthesis results and return completed chunk indices.
+
+        Args:
+            pdf_hash: PDF file hash, or ``None`` when caching is disabled.
+            enriched_chunks: Full list of chunks for this PDF.
+            stats: Mutable stats accumulator.
+
+        Returns:
+            Set of chunk indices already synthesized in a previous run.
+        """
+        if self.cache is None or pdf_hash is None:
+            return set()
+
+        completed_indices = self.cache.get_completed_chunk_indices(pdf_hash)
+        if not completed_indices:
+            return set()
+
+        cached_results = self.cache.load_all_synthesis_results(pdf_hash)
+        for qa_tuple in cached_results:
+            self.filter.process_new_pair(qa_tuple)
+            stats.total_pairs_generated += 1
+
+        print(
+            f"  [RESUMING] {len(completed_indices)}/{len(enriched_chunks)} "
+            f"chunks already processed — resuming from next."
+        )
+        return completed_indices
+
+    def _select_active_chunks(
+        self,
+        enriched_chunks: list[str],
+        completed_indices: set[int],
+    ) -> list[tuple[int, str]]:
+        """Resolve both filtering gates and return chunks ready for synthesis.
+
+        Applies chunk deduplication and (optionally) diversity selection to
+        all not-yet-completed chunks, returning only those that should
+        proceed to the teacher-model API.
+
+        When diversity selection is enabled the gate order is:
+
+        1. **Chunk dedup** — eliminates near-duplicate source chunks.
+        2. **Diversity selection** — keeps the most semantically varied subset.
+
+        When diversity selection is disabled, only chunk dedup runs.
+
+        Args:
+            enriched_chunks: Full list of enriched markdown chunks for this PDF.
+            completed_indices: Indices already synthesized in a previous run.
+
+        Returns:
+            Ordered ``[(index, chunk), ...]`` pairs ready for synthesis.
+        """
+        candidates = [
+            (j, c) for j, c in enumerate(enriched_chunks)
+            if j not in completed_indices
+        ]
+        if not candidates:
+            return []
+
+        if self.diversity_selector is not None:
+            # Gate 1 — chunk dedup (pre-filters before diversity selection)
+            deduped = [
+                (j, c) for j, c in candidates
+                if not self.chunk_filter.is_duplicate(c)
+            ]
+            if not deduped:
+                return []
+
+            # Gate 2 — diversity selection on deduplicated candidates
+            idxs, texts = zip(*deduped)
+            result = self.diversity_selector.select(list(texts))
+            print(
+                f"  [DiversitySelector] {result.stats['selected_chunks']}/"
+                f"{result.stats['total_chunks']} chunks selected"
+                + (" [sliding window]" if result.used_sliding_window else "")
+            )
+            return [(idxs[i], texts[i]) for i in sorted(result.selected_indices)]
+
+        # Diversity disabled — Gate 1 only
+        return [
+            (j, c) for j, c in candidates
+            if not self.chunk_filter.is_duplicate(c)
+        ]
+
+    def _synthesize_chunk(
+        self,
+        j: int,
+        chunk: str,
+        len_chunks: int,
+        pdf_hash: str | None,
+        stats: _BuildStats,
+    ) -> list[dict]:
+        """Call the teacher model for one chunk, caching the outcome immediately.
+
+        Args:
+            j: Zero-based chunk index (into the original ``enriched_chunks``).
+            chunk: Enriched markdown chunk string.
+            len_chunks: Total chunk count (used only for progress display).
+            pdf_hash: PDF file hash for cache writes, or ``None`` when
+                caching is disabled.
+            stats: Mutable stats accumulator.
+
+        Returns:
+            List of generated QA-tuple dicts (may be empty on failure or
+            when the chunk contains no actionable content).
+        """
+        print(
+            f"  -> Synthesizing chunk {j + 1}/{len_chunks}...",
+            end=" ", flush=True,
+        )
+        try:
+            generated_tuples = self.synthesizer.process_chunk(chunk)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning("Chunk %d/%d failed: %s", j + 1, len_chunks, e)
+            print(f"[ERROR: {type(e).__name__} — skipped]")
+            stats.skipped_chunks += 1
+            self._cache_synthesis(pdf_hash, j, [])
+            return []
+
+        self._cache_synthesis(pdf_hash, j, generated_tuples or [])
+        return generated_tuples or []
 
     # ------------------------------------------------------------------
     # Main build loop
@@ -169,101 +312,43 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
             device_context: Human-readable document label.
             stats: Mutable stats accumulator.
         """
-        # Step 1: Extract and Chunk (with caching)
+        # Step 1: Extract and chunk
         enriched_chunks = extract_chunks_cached(
             pdf_path, device_context, self.extractor, self.cache,
         )
-
         if not enriched_chunks:
             print("  No chunks extracted — skipping this manual.")
             return
 
-        # Determine which chunks were already synthesized
-        pdf_hash: str | None = None
-        completed_indices: set[int] = set()
-        if self.cache is not None:
-            pdf_hash = self.cache.get_pdf_hash(pdf_path)
-            completed_indices = self.cache.get_completed_chunk_indices(pdf_hash)
+        # Step 2: Resume from cache (re-ingest results from a prior run)
+        pdf_hash: str | None = (
+            self.cache.get_pdf_hash(pdf_path) if self.cache is not None else None
+        )
+        completed_indices = self._resume_from_cache(pdf_hash, enriched_chunks, stats)
+        stats.total_chunks_processed += len(completed_indices)
 
-            # Re-ingest previously cached synthesis results into the filter
-            if completed_indices:
-                cached_results = self.cache.load_all_synthesis_results(pdf_hash)
-                for qa_tuple in cached_results:
-                    self.filter.process_new_pair(qa_tuple)
-                    stats.total_pairs_generated += 1
+        # Step 3: Resolve active chunks through dedup and diversity gates
+        active_chunks = self._select_active_chunks(enriched_chunks, completed_indices)
 
-                print(
-                    f"  [RESUMING] {len(completed_indices)}/{len(enriched_chunks)} "
-                    f"chunks already processed — resuming from next."
-                )
-
-        # Gate 2 — diversity selection (operates on the full filtered list)
-        if self.diversity_selector is not None:
-            surviving = [
-                (j, c) for j, c in enumerate(enriched_chunks)
-                if j not in completed_indices
-                and not self.chunk_filter.is_duplicate(c)
-            ]
-            if surviving:
-                idxs, texts = zip(*surviving)
-                result = self.diversity_selector.select(list(texts))
-                diverse_set = set(idxs[i] for i in result.selected_indices)
-                print(
-                    f"  [DiversitySelector] {result.stats['selected_chunks']}/"
-                    f"{result.stats['total_chunks']} chunks selected"
-                    + (" [sliding window]" if result.used_sliding_window else "")
-                )
-            else:
-                diverse_set = set()
-        else:
-            diverse_set = None  # selector disabled — pass all chunks
-
-        # Step 2: Iterate through every chunk
-        for j, chunk in enumerate(enriched_chunks):
-            # Skip chunks already completed in a previous run
-            if j in completed_indices:
-                stats.total_chunks_processed += 1
-                continue
-
-            # Gate 1 — chunk dedup (already evaluated above if selector active)
-            if diverse_set is not None:
-                if j not in diverse_set:
-                    stats.total_chunks_processed += 1
-                    self._cache_synthesis(pdf_hash, j, [])
-                    continue
-            elif self.chunk_filter.is_duplicate(chunk):
-                stats.total_chunks_processed += 1
+        # Chunks eliminated by the gates are cached as empty so they are
+        # gracefully skipped on resume without re-running the gates.
+        active_indices = {j for j, _ in active_chunks}
+        for j in range(len(enriched_chunks)):
+            if j not in completed_indices and j not in active_indices:
                 self._cache_synthesis(pdf_hash, j, [])
-                continue
+                stats.total_chunks_processed += 1
 
+        # Step 4: Synthesize and deduplicate
+        for j, chunk in active_chunks:
             stats.total_chunks_processed += 1
-            print(
-                f"  -> Synthesizing chunk {j + 1}/{len(enriched_chunks)}...",
-                end=" ", flush=True,
-            )
-
-            try:
-                generated_tuples = self.synthesizer.process_chunk(chunk)
-            except Exception as e:  # pylint: disable=broad-exception-caught
-                logger.warning(
-                    "Chunk %d/%d failed in %s: %s",
-                    j + 1, len(enriched_chunks), device_context, e,
-                )
-                print(f"[ERROR: {type(e).__name__} — skipped]")
-                stats.skipped_chunks += 1
-                self._cache_synthesis(pdf_hash, j, [])
-                continue
-
-            # Cache synthesis results immediately (even empty ones)
-            self._cache_synthesis(
-                pdf_hash, j, generated_tuples if generated_tuples else [],
+            generated_tuples = self._synthesize_chunk(
+                j, chunk, len(enriched_chunks), pdf_hash, stats,
             )
 
             if not generated_tuples:
                 print("[Skipped: No actionable data]")
                 continue
 
-            # Step 3: Filter and Deduplicate
             kept_count = 0
             for qa_tuple in generated_tuples:
                 stats.total_pairs_generated += 1
@@ -271,9 +356,7 @@ class DatasetBuilder:  # pylint: disable=too-few-public-methods
                     kept_count += 1
 
             print(f"[Generated {len(generated_tuples)} | Kept {kept_count}]")
-
-            # Brief pause to avoid API rate limits
-            time.sleep(1)
+            time.sleep(_INTER_CHUNK_SLEEP_S)
 
 
 # ==============================================================================
@@ -337,6 +420,8 @@ if __name__ == "__main__":
         extractor=cli_extractor,
         cache=cli_cache,
         diversity_ratio=None if args.no_diversity else args.diversity_ratio,
+        chunk_sim_threshold=args.chunk_sim_threshold,
+        pair_sim_threshold=args.pair_sim_threshold,
     )
 
     builder.build()
