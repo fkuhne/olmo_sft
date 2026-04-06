@@ -1,4 +1,4 @@
-# 🔬 Doctune — PDF Domain Adaptation Pipeline
+# 🔬 Doctune: Domain Adaptation Pipeline for Small Language Models
 
 > End-to-end blueprint for domain-adapting **any HuggingFace causal LM** on PDF document corpora using SFT + DPO
 
@@ -7,9 +7,27 @@
 [![uv](https://img.shields.io/badge/uv-recommended-blueviolet.svg)](https://docs.astral.sh/uv/)
 [![Status](https://img.shields.io/badge/Status-Active-brightgreen.svg)]()
 
-Given a folder of PDF manuals and an API key, **doctune** produces a fully merged,
-deployment-ready model that answers domain questions accurately and refuses
-out-of-domain queries gracefully — all without writing a single training script by hand.
+**Doctune** is a turnkey domain-adaptation toolkit that takes raw PDF documentation and
+produces a fine-tuned, deployment-ready language model in a single reproducible pipeline.
+It bridges the gap between unstructured enterprise documents and production-grade LLMs by
+automating every step — from layout-aware extraction through preference alignment — so
+teams can ship domain-expert models without deep ML infrastructure expertise.
+
+### Key Features
+
+- 📄 **Document parsing with [Docling](https://github.com/DS4SD/docling)** — layout-aware OCR via IBM DocLayNet with batched page processing, retry/split-on-failure, and GPU auto-detection
+- 🧬 **Late chunking for global document awareness** — jina-embeddings-v3 produces document-level contextual embeddings before chunking, preserving cross-section semantics
+- 🧹 **Semantic deduplication** — two-stage cosine similarity filtering (chunk-level at 0.82, prompt-level at 0.92) eliminates redundant training data and cuts API costs
+- 🎯 **Diversity selection** — greedy farthest-first sampling keeps only the most semantically varied chunks, maximising coverage while minimising synthesis spend
+- 🤖 **Teacher-model synthesis** — two-stage prompt structure (focus selection → 3-angle QA) generates high-quality SFT pairs from OpenAI, Anthropic, or local Ollama models
+- 🎓 **SFT fine-tuning** — LoRA-based supervised fine-tuning with auto-detected target modules, works with any HuggingFace causal LM
+- ⚖️ **DPO preference alignment** — β/learning-rate sweep with automatic ranking by reward margin selects the best adapter configuration
+- 📊 **MLflow integration** — every training run (SFT and DPO sweep) is tracked with nested experiment logging for side-by-side comparison
+- 🔬 **Golden evaluation with contamination guard** — type-balanced eval sets enforce cross-provider generation to prevent distributional bias
+- 🚀 **vLLM serving** — merged models deploy directly to a high-throughput OpenAI-compatible inference server
+- ☁️ **RunPod support** — turnkey GPU pod bootstrap scripts for Phases 3–6 (training, eval, merge, serving)
+- 🔄 **Full resumability** — every pipeline stage writes atomically to a SHA-256 keyed cache; interrupted runs resume with zero rework
+- 🏗️ **Model-agnostic** — works out of the box with LLaMA, Mistral, Phi, Gemma, Qwen, OLMo, and any other HuggingFace causal LM
 
 ---
 
@@ -782,7 +800,7 @@ This project is licensed under the **Apache License 2.0** — see the [LICENSE](
 
 ```bibtex
 @misc{doctune,
-  title={Doctune: PDF Domain Adaptation Pipeline for HuggingFace LLMs},
+  title={Doctune: Domain Adaptation Pipeline for Small Language Models},
   author={Felipe Kühne},
   year={2026},
   url={https://github.com/fkuhne/doctune}
