@@ -50,6 +50,50 @@ def detect_provider(model: str) -> str:
 
 
 # ==============================================================================
+# Provider Family Helpers
+# ==============================================================================
+PROVIDER_ALTERNATIVES: dict[str, list[str]] = {
+    "openai":    ["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+    "anthropic": ["gpt-5.4", "gpt-5.4-mini"],
+    "ollama":    ["claude-3-5-haiku-20241022", "gpt-5.4-mini"],
+}
+
+
+def check_provider_separation(
+    model_a: str,
+    model_b: str,
+) -> tuple[bool, str, str]:
+    """Check whether two models belong to different provider families.
+
+    Useful for enforcing eval-contamination guards where the eval model
+    must come from a different provider than the training model.
+
+    Args:
+        model_a: First model identifier.
+        model_b: Second model identifier.
+
+    Returns:
+        Tuple of ``(is_separated, provider_a, provider_b)`` where
+        ``is_separated`` is ``True`` when the providers differ.
+    """
+    pa = detect_provider(model_a)
+    pb = detect_provider(model_b)
+    return (pa != pb, pa, pb)
+
+
+def get_alternative_models(provider: str) -> list[str]:
+    """Return suggested models from provider families other than *provider*.
+
+    Args:
+        provider: The provider to find alternatives for.
+
+    Returns:
+        List of recommended model identifiers, or empty list if none configured.
+    """
+    return PROVIDER_ALTERNATIVES.get(provider, [])
+
+
+# ==============================================================================
 # Client Construction
 # ==============================================================================
 def build_client(

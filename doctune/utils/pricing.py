@@ -24,7 +24,7 @@ class ModelPricing(BaseModel):
 
 # Prices are USD per 1M tokens (standard tier) and can be expanded as needed.
 # Source baseline: https://developers.openai.com/api/docs/pricing
-OPENAI_PRICING_PER_1M: dict[str, ModelPricing] = {
+MODEL_PRICING_PER_1M: dict[str, ModelPricing] = {
     # GPT-5 family
     "gpt-5.2": ModelPricing(input=1.75, cached_input=0.175, output=14.00),
     "gpt-5.2-pro": ModelPricing(input=21.00, cached_input=None, output=168.00),
@@ -54,11 +54,11 @@ OPENAI_PRICING_PER_1M: dict[str, ModelPricing] = {
 
 def _normalize_model(model: str) -> str:
     """Return the best pricing-table key for a possibly versioned model id."""
-    if model in OPENAI_PRICING_PER_1M:
+    if model in MODEL_PRICING_PER_1M:
         return model
 
     # Prefer longest prefix match so specific entries win over generic ones.
-    for candidate in sorted(OPENAI_PRICING_PER_1M, key=len, reverse=True):
+    for candidate in sorted(MODEL_PRICING_PER_1M, key=len, reverse=True):
         if model.startswith(candidate):
             return candidate
     return model
@@ -82,7 +82,7 @@ def compute_model_usage_cost(
         Estimated USD cost. Unknown models return ``0.0`` and log a warning.
     """
     resolved = _normalize_model(model)
-    pricing = OPENAI_PRICING_PER_1M.get(resolved)
+    pricing = MODEL_PRICING_PER_1M.get(resolved)
     if pricing is None:
         logger.warning("No pricing configured for model '%s'; defaulting cost to 0.0", model)
         return 0.0
@@ -99,3 +99,30 @@ def compute_model_usage_cost(
         + (safe_cached_tokens * cached_input_rate)
         + (safe_output_tokens * pricing.output)
     ) / 1_000_000
+
+
+def estimate_batch_cost(
+    model: str,
+    count: int,
+    input_tokens_per_item: int = 180,
+    output_tokens_per_item: int = 320,
+) -> float:
+    """Estimate total USD cost for a batch of API calls.
+
+    Convenience wrapper around :func:`compute_model_usage_cost` for
+    pre-flight cost checks where exact token counts are unknown.
+
+    Args:
+        model: Model identifier (supports prefix matching).
+        count: Number of items (e.g. scenarios) to generate.
+        input_tokens_per_item: Estimated input tokens per item.
+        output_tokens_per_item: Estimated output tokens per item.
+
+    Returns:
+        Estimated USD cost. Returns ``0.0`` for unknown models.
+    """
+    return compute_model_usage_cost(
+        model=model,
+        input_tokens=count * input_tokens_per_item,
+        output_tokens=count * output_tokens_per_item,
+    )

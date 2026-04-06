@@ -9,13 +9,17 @@ from doctune.utils.model_utils import (
     load_tokenizer,
 )
 from doctune.utils.provider_utils import (
+    PROVIDER_ALTERNATIVES,
     build_client,
+    check_provider_separation,
     detect_provider,
+    get_alternative_models,
     retry_on_rate_limit,
 )
 from doctune.utils.pricing import (
-    OPENAI_PRICING_PER_1M,
+    MODEL_PRICING_PER_1M,
     compute_model_usage_cost,
+    estimate_batch_cost,
 )
 
 __all__ = [
@@ -27,10 +31,14 @@ __all__ = [
     "load_base_model",
     "load_tokenizer",
     # provider_utils
+    "PROVIDER_ALTERNATIVES",
     "build_client",
+    "check_provider_separation",
     "detect_provider",
+    "get_alternative_models",
     "retry_on_rate_limit",
     # pricing
-    "OPENAI_PRICING_PER_1M",
+    "MODEL_PRICING_PER_1M",
     "compute_model_usage_cost",
+    "estimate_batch_cost",
 ]
