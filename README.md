@@ -783,8 +783,8 @@ This project is licensed under the **Apache License 2.0** — see the [LICENSE](
 ```bibtex
 @misc{doctune,
   title={Doctune: PDF Domain Adaptation Pipeline for HuggingFace LLMs},
-  author={Felipe Kuhne},
+  author={Felipe Kühne},
   year={2026},
-  url={https://github.com/felipekuhne/doctune}
+  url={https://github.com/fkuhne/doctune}
 }
 ```
