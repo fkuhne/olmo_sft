@@ -41,11 +41,11 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-_MODEL_ID       = "jinaai/jina-embeddings-v3"
-_MAX_TOKENS     = 8192
+MODEL_ID        = "jinaai/jina-embeddings-v3"
+MAX_TOKENS      = 8192
 _WINDOW_TOKENS  = 7500   # tokens per sliding window
 _OVERLAP_TOKENS = 500    # overlap between adjacent windows
-_EMBED_DIM      = 1024   # jina-embeddings-v3 output dimension
+EMBED_DIM       = 1024   # jina-embeddings-v3 output dimension
 _SEPARATOR      = "\n"   # used when reconstructing a document from chunks
 
 
@@ -168,7 +168,7 @@ def pool_all_spans(
         Numpy array of shape ``[n_chunks, embed_dim]`` (float32).
     """
     n   = len(char_spans)
-    arr = np.zeros((n, _EMBED_DIM), dtype=np.float32)
+    arr = np.zeros((n, EMBED_DIM), dtype=np.float32)
     for i, (cs, ce) in enumerate(char_spans):
         try:
             ts, te  = char_span_to_token_span(cs, ce, offset_mapping)
@@ -230,7 +230,7 @@ class LateChunker:
 
     def __init__(
         self,
-        model_id: str = _MODEL_ID,
+        model_id: str = MODEL_ID,
         device:   str | None = None,
     ) -> None:
         self.model_id = model_id
@@ -306,7 +306,7 @@ class LateChunker:
         self._ensure_loaded()
 
         if not chunks:
-            return np.empty((0, _EMBED_DIM), dtype=np.float32)
+            return np.empty((0, EMBED_DIM), dtype=np.float32)
 
         norm_chunks = [normalize(c) for c in chunks]
         full_text, char_spans = reconstruct_full_text(norm_chunks)
@@ -314,7 +314,7 @@ class LateChunker:
         total_tokens = self.count_tokens(full_text)
         self.last_token_count = total_tokens
 
-        if total_tokens > _MAX_TOKENS:
+        if total_tokens > MAX_TOKENS:
             return self._encode_sliding_window(full_text, char_spans, task=task)
         return self._encode_single(full_text, char_spans, task=task)
 
@@ -421,7 +421,7 @@ class LateChunker:
                     )
 
         # Fill gaps with zero vectors (should be rare)
-        arr = np.zeros((n, _EMBED_DIM), dtype=np.float32)
+        arr = np.zeros((n, EMBED_DIM), dtype=np.float32)
         for i, emb in enumerate(embeddings):
             if emb is not None:
                 arr[i] = emb
@@ -450,7 +450,7 @@ class LateChunker:
             text,
             return_tensors="pt",
             truncation=True,
-            max_length=_MAX_TOKENS,
+            max_length=MAX_TOKENS,
             return_offsets_mapping=True,
         )
         # Pop offset_mapping BEFORE passing to the model — Jina's custom

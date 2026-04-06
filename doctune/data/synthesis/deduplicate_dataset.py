@@ -16,6 +16,7 @@ from sentence_transformers import SentenceTransformer, util
 
 logger = logging.getLogger(__name__)
 
+_DEDUP_MODEL_ID: str = "all-MiniLM-L6-v2"
 _embedding_model: SentenceTransformer | None = None
 
 
@@ -23,7 +24,7 @@ def _get_embedding_model() -> SentenceTransformer:
     """Return the shared sentence-transformer model, loading it on first call."""
     global _embedding_model  # noqa: PLW0603
     if _embedding_model is None:
-        _embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+        _embedding_model = SentenceTransformer(_DEDUP_MODEL_ID)
     return _embedding_model
 
 _REQUIRED_KEYS = ("prompt", "chosen", "rejected")
@@ -119,9 +120,16 @@ class DatasetFilter:
 
         Args:
             output_path: Destination file path.
+
+        Raises:
+            OSError: If the file cannot be written (logged before re-raising).
         """
         content = "\n".join(json.dumps(item) for item in self.accepted_data) + "\n"
-        Path(output_path).write_text(content, encoding="utf-8")
+        try:
+            Path(output_path).write_text(content, encoding="utf-8")
+        except OSError as exc:
+            logger.error("Failed to write dataset to %s: %s", output_path, exc)
+            raise
         logger.info("Saved %d QA pairs to %s", len(self.accepted_data), output_path)
         print(f"Saved {len(self.accepted_data)} highly diverse QA pairs to {output_path}.")
 

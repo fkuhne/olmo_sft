@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from doctune.data.synthesis.late_chunker import LateChunker, _EMBED_DIM, _MAX_TOKENS, _MODEL_ID
+from doctune.data.synthesis.late_chunker import LateChunker, EMBED_DIM, MAX_TOKENS, MODEL_ID
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class DiversitySelector:
 
     def __init__(
         self,
-        model_id:         str   = _MODEL_ID,
+        model_id:         str   = MODEL_ID,
         diversity_ratio:  float = 0.7,
         min_chunks:       int   = 5,
         device:           str | None = None,
@@ -111,7 +111,7 @@ class DiversitySelector:
             all embeddings (for downstream use).
         """
         if not chunks:
-            return SelectionResult([], [], np.empty((0, _EMBED_DIM)), 0)
+            return SelectionResult([], [], np.empty((0, EMBED_DIM)), 0)
 
         k = max(self.min_chunks, round(len(chunks) * self.diversity_ratio))
         k = min(k, len(chunks))  # never ask for more than we have
@@ -122,7 +122,7 @@ class DiversitySelector:
         # LateChunker.encode() caches the token count — use it to detect
         # whether the sliding window was needed (avoids re-tokenizing)
         total_tokens = self._chunker.last_token_count
-        used_window  = total_tokens > _MAX_TOKENS
+        used_window  = total_tokens > MAX_TOKENS
 
         # Greedy farthest-first diversity selection
         selected_indices = _greedy_farthest_first(embeddings, k)

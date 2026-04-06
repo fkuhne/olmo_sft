@@ -28,6 +28,7 @@ class _SpendTotals:  # pylint: disable=too-many-instance-attributes
 
 
 def _resolve_inputs(input_path: str) -> list[Path]:
+    """Resolve input_path to a list of synthesis JSONL file paths."""
     path = Path(input_path)
     if path.is_file():
         return [path]
@@ -37,6 +38,7 @@ def _resolve_inputs(input_path: str) -> list[Path]:
 
 
 def _safe_int(value: object) -> int:
+    """Coerce value to a non-negative int, returning 0 on failure."""
     try:
         return max(0, int(value))
     except (TypeError, ValueError):
@@ -44,6 +46,7 @@ def _safe_int(value: object) -> int:
 
 
 def _safe_float(value: object) -> float:
+    """Coerce value to a float, returning 0.0 on failure."""
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -51,6 +54,7 @@ def _safe_float(value: object) -> float:
 
 
 def _iter_jsonl(path: Path):
+    """Yield parsed JSON records from a JSONL file, skipping blank and malformed lines."""
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue

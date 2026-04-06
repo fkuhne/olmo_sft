@@ -29,8 +29,12 @@ def _build_usage(input_tokens: int | None, output_tokens: int | None) -> UsageMe
     }
 
 
-def _extract_usage_from_openai_responses(response: object) -> UsageMetrics:
-    """Extract usage metrics from an OpenAI Responses API object."""
+def _extract_usage_input_output(response: object) -> UsageMetrics:
+    """Extract usage from responses that expose input_tokens / output_tokens.
+
+    Covers both the OpenAI Responses API and the Anthropic messages API,
+    which share the same field names on their usage objects.
+    """
     usage = getattr(response, "usage", None)
     if usage is None:
         return _build_usage(0, 0)
@@ -48,17 +52,6 @@ def _extract_usage_from_openai_chat(response: object) -> UsageMetrics:
     return _build_usage(
         getattr(usage, "prompt_tokens", None),
         getattr(usage, "completion_tokens", None),
-    )
-
-
-def _extract_usage_from_anthropic(response: object) -> UsageMetrics:
-    """Extract usage metrics from Anthropic responses."""
-    usage = getattr(response, "usage", None)
-    if usage is None:
-        return _build_usage(0, 0)
-    return _build_usage(
-        getattr(usage, "input_tokens", None),
-        getattr(usage, "output_tokens", None),
     )
 
 
@@ -196,7 +189,7 @@ class TeacherModelSynthesizer:
         )
         return (
             [pair.model_dump() for pair in response.output_parsed.qa_pairs],
-            _extract_usage_from_openai_responses(response),
+            _extract_usage_input_output(response),
         )
 
     @retry_on_rate_limit()
@@ -224,7 +217,7 @@ class TeacherModelSynthesizer:
         )
         return (
             response.output_parsed.rejected,
-            _extract_usage_from_openai_responses(response),
+            _extract_usage_input_output(response),
         )
 
     # --------------------------------------------------------------------------
@@ -242,7 +235,7 @@ class TeacherModelSynthesizer:
             messages=[{"role": "user", "content": user_prompt}],
             temperature=temperature,
         )
-        return response.content[0].text, _extract_usage_from_anthropic(response)
+        return response.content[0].text, _extract_usage_input_output(response)
 
     @retry_on_rate_limit()
     def _ollama_raw_call(
