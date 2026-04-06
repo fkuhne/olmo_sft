@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 
 from datasets import Dataset, load_dataset
 from transformers import TrainingArguments
@@ -32,6 +33,10 @@ def add_common_train_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output", type=str, default=None,
                         help="Output directory (derived from run name if omitted)")
     parser.add_argument("--max-seq-length", type=int, default=2048)
+    parser.add_argument(
+        "--max-prompt-length", type=int, default=1024,
+        help="Maximum prompt token length passed to DPOTrainer (default: 1024)",
+    )
 
 
 def build_training_args(
@@ -89,7 +94,18 @@ def load_datasets(data_path: str, eval_path: str) -> tuple[Dataset, Dataset]:
 
     Returns:
         A ``(train_dataset, eval_dataset)`` tuple.
+
+    Raises:
+        FileNotFoundError: If either dataset file does not exist, with a
+            message prompting the user to run the data pipeline first.
     """
+    for label, path in (("Training", data_path), ("Eval", eval_path)):
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"{label} dataset not found: {path!r}. "
+                "Run the data pipeline first to generate it "
+                "(see doctune/data/README.md)."
+            )
     train_ds = load_dataset("json", data_files=data_path, split="train")
     eval_ds = load_dataset("json", data_files=eval_path, split="train")
     return train_ds, eval_ds

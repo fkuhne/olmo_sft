@@ -51,6 +51,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--lora-r", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument(
+        "--lora-dropout", type=float, default=0.05,
+        help="LoRA dropout rate (default: 0.05)",
+    )
     return parser.parse_args()
 
 
@@ -68,8 +72,10 @@ def main() -> None:
         r=args.lora_r,
         lora_alpha=args.lora_alpha,
         target_modules=target_modules,
+        # Llama-family specific: other architectures may use different
+        # embedding / head layer names. Update if switching model families.
         modules_to_save=["lm_head", "embed_tokens"],
-        lora_dropout=0.05,
+        lora_dropout=args.lora_dropout,
         bias="none",
         task_type=TaskType.CAUSAL_LM,
     )

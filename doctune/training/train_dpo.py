@@ -66,7 +66,11 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(description="Doctune DPO Training")
     add_common_train_args(parser)
-    parser.add_argument("--sft-adapter", type=str, default="./doctune-sft")
+    parser.add_argument(
+        "--sft-adapter", type=str, default="./doctune-sft",
+        help="Path to SFT LoRA adapter directory (default: ./doctune-sft, "
+             "produced by train_sft.py with its default --output)",
+    )
     parser.add_argument(
         "--betas", type=float, nargs="+", default=[0.05, 0.1, 0.25, 0.5],
         help="DPO beta values to sweep",
@@ -74,6 +78,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--lrs", type=float, nargs="+", default=[5e-6, 1e-6],
         help="Learning rates to sweep",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=2,
+        help="Per-device train batch size for DPO (default: 2; lower than SFT due to ref model memory)",
+    )
+    parser.add_argument(
+        "--grad-accum", type=int, default=16,
+        help="Gradient accumulation steps for DPO (default: 16)",
     )
     return parser.parse_args()
 
@@ -218,8 +230,8 @@ def main() -> None:
             training_args = build_training_args(
                 output_dir=output_dir,
                 run_name=run_name,
-                batch_size=2,
-                grad_accum=16,
+                batch_size=args.batch_size,
+                grad_accum=args.grad_accum,
                 lr=lr_val,
                 remove_unused_columns=False,
             )
@@ -234,7 +246,7 @@ def main() -> None:
                 tokenizer=tokenizer,
                 beta=beta_val,
                 max_length=args.max_seq_length,
-                max_prompt_length=1024,
+                max_prompt_length=args.max_prompt_length,
             )
 
             logger.info("Initiating DPO Training for %s...", run_name)
